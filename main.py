@@ -1,74 +1,149 @@
-#-- TODO List --#
-# 1. Read the image
-# 2. Apply processing
-#   2.1 Convert to grayscale
-#   2.2 Apply Gaussian blur
-#   2.3 Apply Canny edge detection
-# 3. Extract numbers and letters (through KEROS OCR)
-# 4. Get position, label and confidence, and convert image to a matrix
-# 5. Show the image and the matrix in a GUI (for now)
-
 import cv2
 import numpy as np
 from pathlib import Path
+from dataclasses import dataclass
+from typing import Optional, Tuple, List
+import sys
 
-def load_image():
-    while True:
-        file_path = input("Enter the path to your image file: ").strip()
-        file_path = file_path.replace("\"", "").replace("\'", "")
-        file_path = file_path.lstrip("\"\'").rstrip("\"\'")
+@dataclass
+class ImageProcessor:
+    image: np.ndarray
+    gray: np.ndarray = None
+    binary: np.ndarray = None
+    contours: List = None
+    
+    @staticmethod
+    def validate_file_path(file_path: str) -> bool:
+        path = Path(file_path)
+        return (path.is_file() and 
+                path.suffix.lower() in ('.png', '.jpg', '.jpeg'))
+    
+    @classmethod
+    def from_file(cls, file_path: str) -> Optional['ImageProcessor']:
+        if not cls.validate_file_path(file_path):
+            return None
         
-        if not file_path:
-            print("Error: No path provided.")
-            continue
-        elif not Path(file_path).is_file():
-            print("Error: Invalid file path.")
-            continue
-        elif not file_path.lower().endswith((".png", ".jpg", ".jpeg")):
-            print("Error: Invalid file format. Please use PNG, JPG, or JPEG.")
-            continue
-
-        # Read the image
         img = cv2.imread(file_path)
-        if img is None:
-            print("Error: Unable to read the image.")
-            continue
-        break
-
-    # Image processing (May god have mercy on my soul)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    blur = cv2.GaussianBlur(gray, (7, 7), 0)
-    kernel = np.ones((3,3), np.uint8)
-    morph = cv2.morphologyEx(blur, cv2.MORPH_CLOSE, kernel)
-    _, binarized = cv2.threshold(morph, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    binarized = cv2.erode(binarized, kernel, iterations=1)
-    binarized = cv2.dilate(binarized, kernel, iterations=1)
-
-    # External grid detection (1/3)
-    contours, _ = cv2.findContours(binarized, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    largest_contour = max(contours, key=cv2.contourArea)
+        return cls(img) if img is not None else None
     
-    print("Detected {} contours in the image.".format(len(contours)))
+    def preprocess(self) -> None:
+        self.gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
+        blur = cv2.GaussianBlur(self.gray, (7, 7), 0)
+        kernel = np.ones((3,3), np.uint8)
+        morph = cv2.morphologyEx(blur, cv2.MORPH_CLOSE, kernel)
+        _, self.binary = cv2.threshold(morph, 0, 255, 
+                                    cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        self.binary = cv2.erode(self.binary, kernel, iterations=1)
+        self.binary = cv2.dilate(self.binary, kernel, iterations=1)
+    
+    def detect_contours(self) -> Tuple[np.ndarray, List]:
+        self.contours, _ = cv2.findContours(self.binary, 
+                                        cv2.RETR_EXTERNAL, 
+                                        cv2.CHAIN_APPROX_SIMPLE)
+        return self.get_largest_contour()
+    
+    def get_largest_contour(self) -> Tuple[np.ndarray, List]:
+        if not self.contours:
+            return None, []
+        largest = max(self.contours, key=cv2.contourArea)
+        epsilon = 0.1 * cv2.arcLength(largest, True)
+        approx = cv2.approxPolyDP(largest, epsilon, True)
+        return approx, self.contours
+
+class ProcessingError(Exception):
+    """Custom exception for image processing errors"""
+    pass
+
+def get_image_path() -> str:
+    while True:
+        try:
+            file_path = input("Enter the path to your image file (or 'q' to quit): ").strip()
+            if file_path.lower() in ('q', 'quit', 'exit'):
+                print("\nExiting program...")
+                sys.exit(0)
+                
+            file_path = file_path.replace("\"", "").replace("\'", "")
+            file_path = file_path.lstrip("\"\'").rstrip("\"\'")
+            
+            if file_path:
+                return file_path
+            print("Error: No path provided.")
+        except KeyboardInterrupt:
+            print("\nExiting program...")
+            sys.exit(0)
+
+def display_contour_info(contours: List, approx: np.ndarray) -> None:
+    print(f"\nDetected {len(contours)} contours in the image.")
     for i, contour in enumerate(contours):
-        print("Contour {}: X={}, Y={}, W={}, H={}".format(i, *cv2.boundingRect(contour)))
+        print(f"Contour {i}: X={cv2.boundingRect(contour)}")
     
-    # Approximate to a rectangle
-    epsilon = 0.1 * cv2.arcLength(largest_contour, True)
-    approx = cv2.approxPolyDP(largest_contour, epsilon, True)
+    if approx is not None:
+        print(f"\nApproximated rectangle: {cv2.boundingRect(approx)}")
+
+def display_results(image: np.ndarray, approx: np.ndarray) -> None:
+    """Display the processed image with contours"""
+    cv2.drawContours(image, [approx], -1, (0, 255, 0), 3)
+    cv2.imshow("Image (Press 'q' to close, 's' to save)", image)
     
-    print("\nApproximated rectangle x: {}, y: {}, w: {}, h: {}".format(*cv2.boundingRect(approx)))
-
-    cv2.drawContours(img, [approx], -1, (0, 255, 0), 3)
-    cv2.imshow("Image", img)
-
-    cv2.waitKey(0)
+    while True:
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q'):
+            break
+        elif key == ord('s'):
+            try:
+                cv2.imwrite("processed_image.png", image)
+                print("Image saved as 'processed_image.png'")
+            except Exception as e:
+                print(f"Error saving image: {e}")
+    
     cv2.destroyAllWindows()
 
+def process_image(file_path: str) -> None:
+    """Main image processing pipeline"""
+    try:
+        processor = ImageProcessor.from_file(file_path)
+        if processor is None:
+            raise ProcessingError("Invalid file or unable to read image")
+            
+        print("\nProcessing image...")
+        processor.preprocess()
+        approx, contours = processor.detect_contours()
+        display_contour_info(contours, approx)
+        
+        if approx is not None:
+            display_results(processor.image, approx)
+    except ProcessingError as e:
+        print(f"Error: {e}")
+    except Exception as e:
+        print(f"Unexpected error: {e}")
 
 def main():
-    print("Treasure Hunt | Starting...")
-    print("Select an image (PNG, JPG, JPEG)")
-    load_image()
+    print("=== Treasure Hunt Image Processor ===")
+    print("Supported formats: PNG, JPG, JPEG")
+    print("Commands: 'q' to quit, 's' to save when viewing image\n")
     
+    while True:
+        try:
+            file_path = get_image_path()
+            process_image(file_path)
+            
+            choice = input("\nProcess another image? (y/n): ").lower()
+            if choice not in ['y', 'yes']:
+                print("\nExiting program...")
+                break
+                
+        except KeyboardInterrupt:
+            print("\nExiting program...")
+            break
+        except Exception as e:
+            print(f"\nUnexpected error: {e}")
+            break
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(f"\nFatal error: {e}")
+    finally:
+        cv2.destroyAllWindows()
+        sys.exit(0)
