@@ -1,149 +1,137 @@
 import cv2
 import numpy as np
 from pathlib import Path
-from dataclasses import dataclass
-from typing import Optional, Tuple, List
 import sys
 
-@dataclass
 class ImageProcessor:
-    image: np.ndarray
-    gray: np.ndarray = None
-    binary: np.ndarray = None
-    contours: List = None
+    def __init__(self, image_path: str):
+        self.image = self._load_image(image_path) if image_path else None
+        
+    def _load_image(self, image_path: str) -> np.ndarray:
+        """Loads an image from the given path, and checks if it's valid"""
+        image_path = image_path.strip().lstrip("'").rstrip("'") # TODO: this is really hacky, we should find a better way to handle this
+        path = Path(image_path) 
+        if not (path.is_file() and path.suffix.lower() in ('.png', '.jpg', '.jpeg')):
+            raise ValueError("Invalid image file")
+        
+        image = cv2.imread(str(path))
+        if image is None:
+            raise ValueError("Could not read image")
+        return image
     
-    @staticmethod
-    def validate_file_path(file_path: str) -> bool:
-        path = Path(file_path)
-        return (path.is_file() and 
-                path.suffix.lower() in ('.png', '.jpg', '.jpeg'))
-    
-    @classmethod
-    def from_file(cls, file_path: str) -> Optional['ImageProcessor']:
-        if not cls.validate_file_path(file_path):
+    def process(self):
+        """Image processing pipeline"""
+        gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
+        blur = cv2.GaussianBlur(gray, (7, 7), 0)
+        _, binary = cv2.threshold(blur, 0, 255, 
+                                cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, 
+                                    cv2.CHAIN_APPROX_SIMPLE)
+        
+        # Check if any contours found, if so, return the largest one
+        if not contours:
             return None
         
-        img = cv2.imread(file_path)
-        return cls(img) if img is not None else None
-    
-    def preprocess(self) -> None:
-        self.gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
-        blur = cv2.GaussianBlur(self.gray, (7, 7), 0)
-        kernel = np.ones((3,3), np.uint8)
-        morph = cv2.morphologyEx(blur, cv2.MORPH_CLOSE, kernel)
-        _, self.binary = cv2.threshold(morph, 0, 255, 
-                                    cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        self.binary = cv2.erode(self.binary, kernel, iterations=1)
-        self.binary = cv2.dilate(self.binary, kernel, iterations=1)
-    
-    def detect_contours(self) -> Tuple[np.ndarray, List]:
-        self.contours, _ = cv2.findContours(self.binary, 
-                                        cv2.RETR_EXTERNAL, 
-                                        cv2.CHAIN_APPROX_SIMPLE)
-        return self.get_largest_contour()
-    
-    def get_largest_contour(self) -> Tuple[np.ndarray, List]:
-        if not self.contours:
-            return None, []
-        largest = max(self.contours, key=cv2.contourArea)
+        largest = max(contours, key=cv2.contourArea)
         epsilon = 0.1 * cv2.arcLength(largest, True)
         approx = cv2.approxPolyDP(largest, epsilon, True)
-        return approx, self.contours
+        
+        return approx, contours
 
-class ProcessingError(Exception):
-    """Custom exception for image processing errors"""
-    pass
-
-def get_image_path() -> str:
-    while True:
-        try:
-            file_path = input("Enter the path to your image file (or 'q' to quit): ").strip()
-            if file_path.lower() in ('q', 'quit', 'exit'):
-                print("\nExiting program...")
-                sys.exit(0)
-                
-            file_path = file_path.replace("\"", "").replace("\'", "")
-            file_path = file_path.lstrip("\"\'").rstrip("\"\'")
-            
-            if file_path:
-                return file_path
-            print("Error: No path provided.")
-        except KeyboardInterrupt:
-            print("\nExiting program...")
-            sys.exit(0)
-
-def display_contour_info(contours: List, approx: np.ndarray) -> None:
-    print(f"\nDetected {len(contours)} contours in the image.")
-    for i, contour in enumerate(contours):
-        print(f"Contour {i}: X={cv2.boundingRect(contour)}")
+def display_image(image: np.ndarray, contour):
+    """Display image with detected contour"""
+    if contour is not None:
+        cv2.drawContours(image, [contour], -1, (0, 255, 0), 3)
     
-    if approx is not None:
-        print(f"\nApproximated rectangle: {cv2.boundingRect(approx)}")
-
-def display_results(image: np.ndarray, approx: np.ndarray) -> None:
-    """Display the processed image with contours"""
-    cv2.drawContours(image, [approx], -1, (0, 255, 0), 3)
-    cv2.imshow("Image (Press 'q' to close, 's' to save)", image)
-    
-    while True:
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'):
-            break
-        elif key == ord('s'):
-            try:
-                cv2.imwrite("processed_image.png", image)
-                print("Image saved as 'processed_image.png'")
-            except Exception as e:
-                print(f"Error saving image: {e}")
-    
+    cv2.imshow("Image (Press any key to close)", image)
+    cv2.waitKey(0)
     cv2.destroyAllWindows()
 
-def process_image(file_path: str) -> None:
-    """Main image processing pipeline"""
-    try:
-        processor = ImageProcessor.from_file(file_path)
-        if processor is None:
-            raise ProcessingError("Invalid file or unable to read image")
-            
-        print("\nProcessing image...")
-        processor.preprocess()
-        approx, contours = processor.detect_contours()
-        display_contour_info(contours, approx)
-        
-        if approx is not None:
-            display_results(processor.image, approx)
-    except ProcessingError as e:
-        print(f"Error: {e}")
-    except Exception as e:
-        print(f"Unexpected error: {e}")
-
-def main():
-    print("=== Treasure Hunt Image Processor ===")
-    print("Supported formats: PNG, JPG, JPEG")
-    print("Commands: 'q' to quit, 's' to save when viewing image\n")
+def main(args=None):
+    print("TreasureMaze v0.3")
     
-    while True:
-        try:
-            file_path = get_image_path()
-            process_image(file_path)
-            
-            choice = input("\nProcess another image? (y/n): ").lower()
-            if choice not in ['y', 'yes']:
-                print("\nExiting program...")
-                break
-                
-        except KeyboardInterrupt:
-            print("\nExiting program...")
-            break
-        except Exception as e:
-            print(f"\nUnexpected error: {e}")
-            break
-
-if __name__ == "__main__":
     try:
-        main()
-    except Exception as e:
-        print(f"\nFatal error: {e}")
+        # Get image path
+        image_path = input("Enter image path: ").strip() if args is None else args
+        
+        # Process image
+        processor = ImageProcessor(image_path)
+        result = processor.process()
+        
+        if result:
+            approx, contours = result
+            print(f"Found {len(contours)} contours")
+            print(f"Approximated contour has {len(approx)} vertices")
+            print("\nCoordinates:")
+            for i, point in enumerate(approx, 1):
+                x, y = point[0]
+                print(f"  Point {i}: ({x}, {y})")
+            
+            # Perspective correction stuff
+            # Partially stolen from here: https://www.pyimagesearch.com/2014/08/25/4-point-opencv-getperspective-transform-example/
+            
+            src_pts = approx.reshape(4, 2).astype(np.float32) # Get vertices of the approximated contour
+            
+            # Align the points in the correct order (top-left, top-right, bottom-right, bottom-left)
+            rect = np.zeros((4, 2), dtype=np.float32)
+            s = src_pts.sum(axis=1)
+            rect[0] = src_pts[np.argmin(s)]  # Top-left
+            rect[2] = src_pts[np.argmax(s)]  # Bottom-right
+            diff = np.diff(src_pts, axis=1)
+            rect[1] = src_pts[np.argmin(diff)]  # Top-right
+            rect[3] = src_pts[np.argmax(diff)]  # Bottom-left
+            src_pts = rect
+
+            # Calculate width and height of the new image with padding
+            padding = 1
+            width = max(int(np.linalg.norm(src_pts[0] - src_pts[1])),
+                    int(np.linalg.norm(src_pts[2] - src_pts[3]))) + (2 * padding)
+            height = max(int(np.linalg.norm(src_pts[1] - src_pts[2])),
+                        int(np.linalg.norm(src_pts[3] - src_pts[0]))) + (2 * padding)
+            
+            # Create destination points with padding
+            dst_pts = np.array([
+                [padding, padding],           # top-left
+                [width - padding, padding],   # top-right
+                [width - padding, height - padding],  # bottom-right
+                [padding, height - padding]   # bottom-left
+            ], dtype=np.float32)
+
+            # Apply perspective transformation through CV2
+            matrix = cv2.getPerspectiveTransform(src_pts, dst_pts)
+            warped = cv2.warpPerspective(processor.image, matrix, (width, height))
+            
+            gray_wr = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+            blur_wr = cv2.GaussianBlur(gray_wr, (7, 7), 0)
+            _, binary_wr = cv2.threshold(blur_wr, 0, 255, 
+                                    cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+            
+            # Crop external borders
+            TRESHOLD = 0
+            binary_wr = binary_wr[TRESHOLD:binary_wr.shape[0]-TRESHOLD, TRESHOLD:binary_wr.shape[1]-TRESHOLD] 
+            warped = warped[TRESHOLD:warped.shape[0]-TRESHOLD, TRESHOLD:warped.shape[1]-TRESHOLD]
+            
+            # Check if the borders are still present, if so, increment the trheshold until there's no external border
+            while binary_wr[0, 0] == 255 or binary_wr[0, binary_wr.shape[1]-1] == 255 or binary_wr[binary_wr.shape[0]-1, 0] == 255 or binary_wr[binary_wr.shape[0]-1, binary_wr.shape[1]-1] == 255:
+                TRESHOLD += 1
+                binary_wr = binary_wr[TRESHOLD:binary_wr.shape[0]-TRESHOLD, TRESHOLD:binary_wr.shape[1]-TRESHOLD]
+                warped = warped[TRESHOLD:warped.shape[0]-TRESHOLD, TRESHOLD:warped.shape[1]-TRESHOLD]
+            print(f"Final threshold: {TRESHOLD}")
+        
+            cv2.imshow("Warped", warped)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+            
+            
+
+        else:
+            print("No contours found!")
+            
+    except (ValueError, KeyboardInterrupt) as e:
+        print(f"Error: {e}")
     finally:
         cv2.destroyAllWindows()
-        sys.exit(0)
+
+if __name__ == "__main__":
+    # Check if the user has provided an image path as an argument
+    main(sys.argv[1] if len(sys.argv) > 1 else None)
