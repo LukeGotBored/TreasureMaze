@@ -8,11 +8,11 @@ class ImageProcessor:
         self.image = self._load_image(image_path) if image_path else None
         
     def _load_image(self, image_path: str) -> np.ndarray:
-        """Loads an image from the given path, and checks if it's valid"""
-        image_path = image_path.strip().lstrip("'").rstrip("'") # TODO: this is really hacky, we should find a better way to handle this
+        """Loads an image from the given path, and checks if it's valid."""
+        image_path = image_path.strip("'\"")  # Clean up quotes
         path = Path(image_path) 
         if not (path.is_file() and path.suffix.lower() in ('.png', '.jpg', '.jpeg')):
-            raise ValueError("Invalid image file")
+            raise ValueError("Invalid image file.")
         
         image = cv2.imread(str(path))
         if image is None:
@@ -107,16 +107,16 @@ def main(args=None):
                                     cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
             
             # Crop external borders
-            TRESHOLD = 0
-            binary_wr = binary_wr[TRESHOLD:binary_wr.shape[0]-TRESHOLD, TRESHOLD:binary_wr.shape[1]-TRESHOLD] 
-            warped = warped[TRESHOLD:warped.shape[0]-TRESHOLD, TRESHOLD:warped.shape[1]-TRESHOLD]
+            border_threshold = 0  # Renamed from TRESHOLD
+            binary_wr = binary_wr[border_threshold:binary_wr.shape[0]-border_threshold, border_threshold:binary_wr.shape[1]-border_threshold] 
+            warped = warped[border_threshold:warped.shape[0]-border_threshold, border_threshold:warped.shape[1]-border_threshold]
             
-            # Check if the borders are still present, if so, increment the trheshold until there's no external border
+            # Check if the borders are still present, if so, increment the threshold until there's no external border
             while binary_wr[0, 0] == 255 or binary_wr[0, binary_wr.shape[1]-1] == 255 or binary_wr[binary_wr.shape[0]-1, 0] == 255 or binary_wr[binary_wr.shape[0]-1, binary_wr.shape[1]-1] == 255:
-                TRESHOLD += 1
-                binary_wr = binary_wr[TRESHOLD:binary_wr.shape[0]-TRESHOLD, TRESHOLD:binary_wr.shape[1]-TRESHOLD]
-                warped = warped[TRESHOLD:warped.shape[0]-TRESHOLD, TRESHOLD:warped.shape[1]-TRESHOLD]
-            print(f"Final threshold: {TRESHOLD}")
+                border_threshold += 1
+                binary_wr = binary_wr[border_threshold:binary_wr.shape[0]-border_threshold, border_threshold:binary_wr.shape[1]-border_threshold]
+                warped = warped[border_threshold:warped.shape[0]-border_threshold, border_threshold:warped.shape[1]-border_threshold]
+            print(f"Final threshold: {border_threshold}")
         
             cv2.imshow("Warped", warped)
             cv2.waitKey(0)
