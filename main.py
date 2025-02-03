@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 import sys
 
+
 class ImageProcessor:
 	def __init__(self, image_path: str):
 		start = time.time()
@@ -23,14 +24,17 @@ class ImageProcessor:
 		_, binary = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 		binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8), iterations=1)
 		contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+		
 		if not contours:
 			print(f"Processing took {time.time() - start:.4f} seconds")
 			return None
+			
 		largest = max(contours, key=cv2.contourArea)
 		epsilon = 0.1 * cv2.arcLength(largest, True)
 		approx = cv2.approxPolyDP(largest, epsilon, True)
 		print(f"* | Processing [{time.time() - start:.4f}s]")
 		return approx, contours
+
 
 def main(args=None):
 	print("TreasureMaze")
@@ -39,9 +43,11 @@ def main(args=None):
 		image_path = input("* | Enter image path: ").strip() if args is None else args
 		processor = ImageProcessor(image_path)
 		result = processor.process()
+		
 		if not result:
 			print("x | No contours found!")
 			return
+			
 		approx, contours = result
 		print(f"* | Found {len(contours)} contours")
 		print(f"* | Approximated contour has {len(approx)} vertices")
@@ -90,6 +96,7 @@ def main(args=None):
 		print(f"Error: {e}")
 	finally:
 		cv2.destroyAllWindows()
+
 
 if __name__ == "__main__":
 	main(sys.argv[1] if len(sys.argv) > 1 else None)
