@@ -29,13 +29,13 @@ class ImageProcessor:
 		self.gray_image = cv2.resize(self.gray_image, (new_w, new_h))
 		
 		
-		print(f"* | Caricamento immagine [{time.time() - start:.4f}s]")
+		print(f"* | Image loaded in [{time.time() - start:.4f}s]")  # Modifica qui
 		
 	def check_blurriness(self):
 		start = time.time()
 		blur = cv2.Laplacian(self.gray_image, cv2.CV_64F).var()
-		print(f"* | Controllo sfocatura [{time.time() - start:.4f}s]")
-		print(f"* | Livello di sfocatura: {blur:.4f}")
+		print(f"* | Blurriness check in [{time.time() - start:.4f}s]")  # Modifica qui
+		print(f"* | Blurriness level: {blur:.4f}")  # Modifica qui
 		return blur < 100
 
 	def process(self):
@@ -71,7 +71,7 @@ def main(args=None):
 		processor = ImageProcessor(image_path)
 		is_blurry = processor.check_blurriness()
 		if is_blurry:
-			print("✘ | Immagine troppo sfocata!")
+			print("✘ | Image too blurry!")  # Modifica qui
 			prompt = input("Continue anyways? (y/N): ")
 			if prompt.lower() != "y":
 				return
@@ -111,7 +111,7 @@ def main(args=None):
 
 		matrix = cv2.getPerspectiveTransform(src_pts, dst_pts)
 		warped = cv2.warpPerspective(processor.color_image, matrix, (width, height))
-		print(f"* | Warping completato in [{time.time() - t_warp_start:.4f}s]")
+		print(f"* | Warping completed in [{time.time() - t_warp_start:.4f}s]")  # Modifica qui
 
 		t_contour_start = time.time()
 		gray_wr = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
@@ -128,8 +128,8 @@ def main(args=None):
 		largest = max(contours_wr, key=cv2.contourArea)
 		contours_wr_filtered = [c for c in contours_wr if cv2.contourArea(c) < cv2.contourArea(largest) and cv2.contourArea(c) > 100]
 
-		print(f"* | Rilevazione contorni completata in [{time.time() - t_contour_start:.4f}s]")
-		print(f"* | Runtime totale [{time.time() - overall_start:.4f}s]")
+		print(f"* | Contours detection completed in [{time.time() - t_contour_start:.4f}s]")  # Modifica qui
+		print(f"* | Total runtime [{time.time() - overall_start:.4f}s]")  # Modifica qui
 
 		if DEBUG:
 			cv2.drawContours(warped, contours_wr, -1, (0, 0, 255), 2)
