@@ -3,12 +3,7 @@
 TreasureMaze is a Python-based project for maze detection and pathfinding optimization.
 
 ## About
-
-This project combines computer vision (using OpenCV) for maze extraction and segmentation with advanced pathfinding algorithms to generate optimal solutions. Recent enhancements include:
-- **Modularization**: Grid processing and digit extraction functions have been moved to `utils.py`.
-- **Code Optimization**: Redundant operations have been minimized to improve performance.
-- **Enhanced Logging**: A helper function now formats console messages compactly and pleasantly.
-- **Improved CLI**: Command-line arguments allow customization of various parameters.
+This project combines computer vision (using OpenCV) for maze extraction and segmentation (through Pytorch and with advanced pathfinding algorithms to generate optimal solutions.
 
 ## Core Features
 
