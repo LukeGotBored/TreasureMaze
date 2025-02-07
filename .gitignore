@@ -6,3 +6,5 @@ venv/
 build/
 dist/
 .venv/
+aima-python/
+.python-version
