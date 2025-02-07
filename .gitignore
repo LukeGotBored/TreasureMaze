@@ -8,3 +8,4 @@ dist/
 .venv/
 aima-python/
 .python-version
+dataset/
