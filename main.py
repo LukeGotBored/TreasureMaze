@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 import sys
 import argparse
-from utils import process_grid, extract_digit_from_cell, log
+from utils import process_grid, log
 
 # --- CONFIG  ---
 
@@ -252,6 +252,8 @@ def main(args=None):
             cv2.waitKey(0)
             cv2.destroyWindow("Digits Grid")
 
+        ## --- CHECKPOINT: Text recognition through EMNIST (and AIMA-Python) ---
+        
     except (ValueError, KeyboardInterrupt) as e:
         log(f"Error: {e}", "ERROR")
     finally:
