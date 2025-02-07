@@ -1,18 +1,22 @@
 # TreasureMaze
-A Python-based project for maze detection and pathfinding optimization.
+
+TreasureMaze is a Python-based project for maze detection and pathfinding optimization.
 
 ## About
-TreasureMaze implements an AI-driven solution for maze navigation and treasure collection problems. 
-The project combines computer vision for maze detection with advanced pathfinding algorithms for optimal solution generation.
+
+This project combines computer vision (using OpenCV) for maze extraction and segmentation with advanced pathfinding algorithms to generate optimal solutions. Recent enhancements include:
+- **Modularization**: Grid processing and digit extraction functions have been moved to `utils.py`.
+- **Code Optimization**: Redundant operations have been minimized to improve performance.
+- **Enhanced Logging**: A helper function now formats console messages compactly and pleasantly.
+- **Improved CLI**: Command-line arguments allow customization of various parameters.
 
 ## Core Features
 
 ### Maze Structure
-- **Start (S)**: Initial agent position
-- **Treasure (T)**: Collection points
-- **Wall (X)**: Destroyable obstacles (cost: 5)
-- **Paths (1/4)**: Traversable cells with associated costs
-
+- **Start (S)**: The agent's starting position.
+- **Treasure (T)**: Points representing treasures.
+- **Wall (X)**: Breakable obstacles with an associated cost (5).
+- **Paths (1/4)**: Traversable cells with their respective costs.
 
 ## Requirements
 - Python 3.x
@@ -20,24 +24,28 @@ The project combines computer vision for maze detection with advanced pathfindin
 - NumPy
 
 ## Installation
-1. Ensure [Python 3.x](https://www.python.org/downloads/) is installed
-2. Clone the repository
+1. Ensure [Python 3.x](https://www.python.org/downloads/) is installed.
+2. Clone the repository.
 3. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
 
 ## Usage
-1. Execute the main script:
-   ```bash
-   python main.py
-   ```
-2. Input the maze image path
-3. Monitor console output for process status
+Run the main script with optional command-line arguments:
+```bash
+python main.py [-d | --debug] [-s | --size SIZE] [--output-size OUTPUT_SIZE] [--output-padding OUTPUT_PADDING] [--img-resize IMG_RESIZE]
+```
+- `-d/--debug`: Enable debug mode.
+- `-s/--size`: Maximum size for the input image (default: 1024).
+- `--output-size`: Output digit size (default: 28).
+- `--output-padding`: Padding for the output (default: 10).
+- `--img-resize`: Override the default image resize value.
+
+After running, provide the maze image path when prompted. Monitor the console for processing details via compact log messages.
 
 ## Contributing
-At the moment, the project is not open to external contributions.
-However, this repository is public and can be used for educational purposes.
+Contributions are not currently accepted, but the repository is public and can be used for educational purposes.
 
 ## License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License – see the [LICENSE](LICENSE) file for details.
