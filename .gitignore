@@ -10,3 +10,4 @@ aima-python/
 .python-version
 dataset/
 model/
+model/history.npy
