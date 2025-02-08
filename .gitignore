@@ -9,3 +9,4 @@ dist/
 aima-python/
 .python-version
 dataset/
+model/
