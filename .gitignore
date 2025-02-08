@@ -11,3 +11,5 @@ aima-python/
 dataset/
 model/
 model/history.npy
+model/history.npy
+model/model.keras
