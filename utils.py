@@ -6,16 +6,16 @@ import time
 def process_grid(warped):
     """Processes the warped maze image to extract grid cells and their details."""
     warped_gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-    warped_blur = cv2.GaussianBlur(warped_gray, (7, 7), 0)
-    _, warped_bin = cv2.threshold(warped_blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    img_contours, hierarchy = cv2.findContours(warped_bin, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    cv2.imshow("gray", warped_gray)
+    # # warped_blur = cv2.GaussianBlur(warped_gray, (7, 7), 0)
+    _, warped_bin = cv2.adaptiveThreshold(warped_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
 
-    if hierarchy is None:
-        print("✘ | No hierarchy found in grid contours.")
-        return {"cells": [], "rows": 0, "cols": 0}
-    if not img_contours:
-        print("✘ | No contours found in grid.")
-        return {"cells": [], "rows": 0, "cols": 0}
+    img_contours, hierarchy = cv2.findContours(warped_bin, cv2.RETR_FLOODFILL, cv2.CHAIN_APPROX_SIMPLE)
+    cv2.drawContours(warped_bin, warped, -1, (0, 255, 0), 2)
+    cv2.imshow("contours", warped_bin)
+    
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 
     grid_rect = cv2.boundingRect(img_contours[0])
 

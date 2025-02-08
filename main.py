@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import time
+import os
 from pathlib import Path
 import sys
 import argparse
@@ -207,6 +208,13 @@ def main(args=None):
                     f"Grid debug: {len(contours_wr_filtered)} filtered contours.",
                     "INFO",
                 )
+                
+                # cv2.drawContours(warped, contours_wr, -1, (255, 0, 0), 2)
+                # cv2.drawContours(warped, contours_wr_filtered, -1, (0, 255, 0), 2) 
+                # cv2.drawContours(warped, [largest], -1, (0, 0, 255), 2)
+                cv2.imshow("Grid Debug", warped)
+                cv2.waitKey(0)
+                cv2.destroyWindow("Grid Debug")
 
         # Process grid using utility function
         grid_data = process_grid(warped)
@@ -236,8 +244,11 @@ def main(args=None):
                 roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
                 _, roi_thresh = cv2.threshold(roi, 100, 255, cv2.THRESH_BINARY)
                 # Apply slight blur for natural appearance (TODO - test if the dataset recognizes this better than without)
-                roi_thresh = cv2.GaussianBlur(roi_thresh, (3, 3), 0)
-                digits.append(roi_thresh)
+                # roi_thresh = cv2.GaussianBlur(roi_thresh, (3, 3), 0)
+                # digits.append(roi_thresh)
+                # cv2.imshow("Digit", roi_thresh)
+                # cv2.waitKey(0)
+                # cv2.destroyWindow("Digit")
 
         if DEBUG:
             # Visualize extracted digits in a grid layout
@@ -253,6 +264,23 @@ def main(args=None):
             cv2.destroyWindow("Digits Grid")
 
         ## --- CHECKPOINT: Text recognition through EMNIST (and AIMA-Python) ---
+        log("Recognizing digits...", "INFO")
+        from keras import layers, regularizers, callbacks, utils
+        import tensorflow as tf
+        
+        # Load the EMNIST model
+        model = tf.keras.models.load_model(os.path.join("model", "model.h5"))
+        
+        # attempt to recognize the digits
+        recognized = []
+        for digit in digits:
+            digit = cv2.bitwise_not(digit)
+            digit = np.expand_dims(digit, axis=-1)
+            digit = np.expand_dims(digit, axis=0)
+            prediction = model.predict(digit)
+            certainty = prediction.max()
+            recognized.append(chr(prediction.argmax() + 48))
+            print(f"Recognized: {chr(prediction.argmax() + 48)} (Certainty: {certainty:.4f})")
         
     except (ValueError, KeyboardInterrupt) as e:
         log(f"Error: {e}", "ERROR")
