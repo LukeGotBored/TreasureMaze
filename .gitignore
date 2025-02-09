@@ -10,6 +10,6 @@ aima-python/
 .python-version
 dataset/
 model/
-model/history.npy
-model/history.npy
-model/model.keras
+logs/
+.vscode/
+_legacy/
