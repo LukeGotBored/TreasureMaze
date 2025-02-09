@@ -1,292 +1,264 @@
+import argparse
+import logging
+import os
+import math
+
 import cv2
 import numpy as np
-import time
-import os
-from pathlib import Path
-import sys
-import argparse
-from utils import process_grid, log
+from colorama import Fore, init
+from logger import setup_logger
 
-# --- CONFIG  ---
+init(autoreset=True)
 
-parser = argparse.ArgumentParser(add_help=False)
-parser.add_argument("-d", "--debug", action="store_true", help="Enable debug mode")
-parser.add_argument(
-    "-s", "--size", type=int, default=1024, help="The maximum size of an input image"
-)
-parser.add_argument(
-    "--output-size", type=int, default=28, help="The output size of the digits"
-)
-parser.add_argument("--output-padding", type=int, default=10, help="Output padding")
-parser.add_argument(
-    "--img-resize",
-    type=int,
-    default=None,
-    help="Image resize constant (overrides default image size)",
-)
+# Processing constants
+MAX_SIZE = 1024                     
+MIN_BLUR_THRESHOLD = 100            
+ADAPTIVE_THRESH_BLOCK_SIZE = 57     
+ADAPTIVE_THRESH_C = 7               
 
+# ---------------- Utility Functions ----------------
 
-args, unknown = parser.parse_known_args()
+def display_image(image: np.ndarray, title: str = "Image") -> None:
+    cv2.imshow(title, image)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 
-DEBUG = args.debug
-DEFAULT_IMG_SIZE = args.size
-OUTPUT_SIZE = args.output_size
-OUTPUT_PADDING = args.output_padding
-IMG_RESIZE = args.img_resize if args.img_resize is not None else DEFAULT_IMG_SIZE
+def check_blurriness(image: np.ndarray) -> float:
+    # Source: https://www.pyimagesearch.com/2015/09/07/blur-detection-with-opencv/
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) > 2 else image
+    return cv2.Laplacian(gray, cv2.CV_64F).var()
 
+def contains(r1: tuple, r2: tuple) -> bool:
+    x1, y1, w1, h1 = r1
+    x2, y2, w2, h2 = r2
+    return x1 >= x2 and y1 >= y2 and (x1 + w1) <= (x2 + w2) and (y1 + h1) <= (y2 + h2)
 
-class ImageProcessor:
-    """Processes an image to extract edges and shapes."""
+def extract_digit(image: np.ndarray, rect: tuple) -> np.ndarray:
+    x, y, w, h = rect
+    d_img = image[y:y+h, x:x+w]
+    d_img = cv2.copyMakeBorder(d_img, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=0)
+    d_img = cv2.resize(d_img, (28, 28), interpolation=cv2.INTER_AREA)
+    if len(d_img.shape) == 3:
+        d_img = cv2.cvtColor(d_img, cv2.COLOR_BGR2GRAY)
+    return cv2.bitwise_not(d_img)
 
-    def __init__(self, image_path: str):
-        start = time.time()
-        path = Path(image_path.strip("'\""))
-        if not (path.is_file() and path.suffix.lower() in (".png", ".jpg", ".jpeg")):
-            raise ValueError("Invalid image file.")
-        self.color_image = cv2.imread(str(path), cv2.IMREAD_COLOR)
-        if self.color_image is None:
-            raise ValueError("Could not read image.")
-        self.gray_image = cv2.cvtColor(self.color_image, cv2.COLOR_BGR2GRAY)
-        h, w = self.color_image.shape[:2]
-        # Resize while preserving aspect ratio
-        if h > w:
-            new_h = IMG_RESIZE
-            new_w = int(w * (new_h / h))
-        else:
-            new_w = IMG_RESIZE
-            new_h = int(h * (new_w / w))
-        self.color_image = cv2.resize(self.color_image, (new_w, new_h))
-        self.gray_image = cv2.resize(self.gray_image, (new_w, new_h))
-        log(f"Image loaded in {time.time() - start:.4f}s")
+# ---------------- Image Preprocessing Functions ----------------
 
-    def check_blurriness(self) -> bool:
-        """Checks whether the image is blurry."""
-        start = time.time()
-        blur = cv2.Laplacian(self.gray_image, cv2.CV_64F).var()
-        log(f"Blur detection took {time.time() - start:.4f}s", "INFO")
-        log(
-            f"Blur level: {blur:.4f} ({'[!] Very Blurry' if blur < 5 else 'Blurry' if blur < 100 else 'Not Blurry'})"
+def preprocess(image: np.ndarray) -> np.ndarray:
+    logger = logging.getLogger('TreasureMaze')
+    if image is None:
+        logger.error("Invalid image")
+        return None
+    try:
+        h, w = image.shape[:2]
+        logger.debug(f"Image dimensions: {w}x{h}")
+        
+        # Resize image if out of bounds (e.g. too big or too small)
+        if max(h, w) > MAX_SIZE or min(h, w) < MAX_SIZE:
+            ratio = MAX_SIZE / float(max(h, w))
+            new_size = (int(w * ratio), int(h * ratio))
+            image = cv2.resize(image, new_size, interpolation=cv2.INTER_AREA)
+            logger.debug(f"Resized image to {new_size[0]}x{new_size[1]}")
+                
+        fm = check_blurriness(image)
+        color = Fore.RED if fm < MIN_BLUR_THRESHOLD * 0.33 else (
+            Fore.YELLOW if fm < MIN_BLUR_THRESHOLD * 0.66 else Fore.GREEN)
+        logger.debug(f"Focus measure: {color}{fm:.2f}{Fore.RESET}")
+        if fm < MIN_BLUR_THRESHOLD:
+            logger.warning(f"{'Very blurry' if fm < 10 else 'Blurry'} image (FM={fm:.2f})")
+            
+        # Apply image processing steps
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        gray = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, kernel)
+        gray = cv2.GaussianBlur(gray, (5, 5), 0)
+        return cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV,
+            ADAPTIVE_THRESH_BLOCK_SIZE, ADAPTIVE_THRESH_C
         )
-        return blur < 100
+    except Exception as e:
+        logger.error(f"Preprocessing error: {e}")
+        return None
 
-    def process(self):
-        """Detects contours and approximates the main shape."""
-        start = time.time()
-        # Apply Gaussian blur and thresholding
-        blur = cv2.GaussianBlur(self.gray_image, (9, 9), 0)
-        thresh = cv2.adaptiveThreshold(
-            blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 57, 7
-        )
-        _, binary = cv2.threshold(
-            thresh, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
-        )
-        binary = cv2.morphologyEx(
-            binary, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8), iterations=1
-        )
-
-        if DEBUG:
-            cv2.imshow("Binary Output", binary)
-            cv2.waitKey(0)
-            cv2.destroyWindow("Binary Output")
-
-        contours, _ = cv2.findContours(
-            binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-        )
+def warp_image(thresh_image: np.ndarray) -> np.ndarray:
+    # Partially adapted from https://www.pyimagesearch.com/2014/08/25/4-point-opencv-getperspective-transform-example/
+    # ? I've mainly changed the code to use numpy arrays and added some error handling
+    logger = logging.getLogger('TreasureMaze')
+    try:
+        contours, _ = cv2.findContours(thresh_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
-            log(f"No contours found. [{time.time() - start:.4f}s]", "ERROR")
+            logger.error("No contours found")
             return None
-
         largest = max(contours, key=cv2.contourArea)
         epsilon = 0.1 * cv2.arcLength(largest, True)
         approx = cv2.approxPolyDP(largest, epsilon, True)
-        log(f"Shape detection completed in {time.time() - start:.4f}s", "INFO")
-        return approx, contours
-
-
-def main(args=None):
-    """Main execution function for TreasureMaze."""
-    log("TreasureMaze | Initialising...")
-    try:
-        overall_start = time.time()
-        image_path = (
-            input("* | Insert the image path: ").strip() if args is None else args
-        )
-
-        processor = ImageProcessor(image_path)
-        if processor.check_blurriness():
-            log("Image appears blurry!", "INFO")
-            if input("Continue anyways? (y/N): ").strip().lower() != "y":
-                return
-
-        result = processor.process()
-        if not result:
-            log("No contours found.", "ERROR")
-            return
-
-        approx, contours = result
-        log(f"{len(contours)} contours found!", "INFO")
-        log(f"Approximated shape: {approx.shape[0]} sides", "INFO")
-        if approx.shape[0] != 4:
-            log("Error: Approximated shape does not have 4 corners.", "ERROR")
-            return
-
-        # Warp transformation: reorder points and compute perspective transform
-        try:
-            src_pts = approx.reshape(4, 2).astype(np.float32)
-            rect = np.zeros((4, 2), dtype=np.float32)
-            s = src_pts.sum(axis=1)
-            rect[0] = src_pts[np.argmin(s)]
-            rect[2] = src_pts[np.argmax(s)]
-            diff = np.diff(src_pts, axis=1)
-            rect[1] = src_pts[np.argmin(diff)]
-            rect[3] = src_pts[np.argmax(diff)]
-            src_pts = rect
-        except Exception as e:
-            log(f"Error computing perspective transform points: {e}", "ERROR")
-            return
-
+        if len(approx) != 4:
+            logger.error("Contour does not have 4 vertices")
+            return None
+        src_pts = approx.reshape(4, 2).astype(np.float32)
+        rect = np.zeros((4, 2), dtype=np.float32)
+        rect[0] = src_pts[np.argmin(src_pts.sum(axis=1))]      # top-left
+        rect[2] = src_pts[np.argmax(src_pts.sum(axis=1))]      # bottom-right
+        rect[1] = src_pts[np.argmin(np.diff(src_pts, axis=1))]   # top-right
+        rect[3] = src_pts[np.argmax(np.diff(src_pts, axis=1))]   # bottom-left
+        
         padding = 15
-        width = max(
-            int(np.linalg.norm(src_pts[0] - src_pts[1])),
-            int(np.linalg.norm(src_pts[2] - src_pts[3])),
-        ) + (2 * padding)
-        height = max(
-            int(np.linalg.norm(src_pts[1] - src_pts[2])),
-            int(np.linalg.norm(src_pts[3] - src_pts[0])),
-        ) + (2 * padding)
+        w = int(max(np.linalg.norm(rect[0] - rect[1]), np.linalg.norm(rect[2] - rect[3]))) + 2 * padding
+        h = int(max(np.linalg.norm(rect[1] - rect[2]), np.linalg.norm(rect[3] - rect[0]))) + 2 * padding
+        
+        dst_pts = np.array([
+            [padding, padding],
+            [w - padding, padding],
+            [w - padding, h - padding],
+            [padding, h - padding],
+        ], dtype=np.float32)
+        M = cv2.getPerspectiveTransform(rect, dst_pts)
+        return cv2.warpPerspective(cv2.cvtColor(thresh_image, cv2.COLOR_GRAY2BGR), M, (w, h))
+    except Exception as e:
+        logger.error(f"Warp error: {e}")
+        return None
 
-        try:
-            dst_pts = np.array(
-                [
-                    [padding, padding],
-                    [width - padding, padding],
-                    [width - padding, height - padding],
-                    [padding, height - padding],
-                ],
-                dtype=np.float32,
-            )
-            matrix = cv2.getPerspectiveTransform(src_pts, dst_pts)
-            warped = cv2.warpPerspective(processor.color_image, matrix, (width, height))
-        except Exception as e:
-            log(f"Error during perspective transformation: {e}", "ERROR")
-            return
+def standardize(file_path: str) -> np.ndarray:
+    logger = logging.getLogger('TreasureMaze')
+    if not file_path or not os.path.exists(file_path):
+        logger.error(f"Invalid file path: {file_path}")
+        return None
+    image = cv2.imread(file_path)
+    if image is None:
+        logger.error(f"Failed to load image: {file_path}")
+        return None
+    processed = preprocess(image)
+    if processed is None:
+        logger.error("Image processing failed")
+        return None
+    warped = warp_image(processed)
+    if warped is None:
+        logger.error("Warp failed")
+        return None
+    return warped
 
-        log(f"Warping completed in {time.time() - overall_start:.4f}s", "INFO")
+def estimate_grid_size(grid_rect: tuple, cells: list) -> tuple:
+    if not cells:
+        return (0, 0)
+    avg_cell_w = sum(cell[2] for cell in cells) / len(cells)
+    avg_cell_h = sum(cell[3] for cell in cells) / len(cells)
+    cols = round(grid_rect[2] / avg_cell_w)
+    rows = round(grid_rect[3] / avg_cell_h)
+    return (rows, cols)
 
-        if DEBUG:
-            # Debug grid detection (optional visualization)
-            gray_wr = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-            blur_wr = cv2.GaussianBlur(gray_wr, (7, 7), 0)
-            thresh_wr = cv2.adaptiveThreshold(
-                blur_wr, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 57, 7
-            )
-            _, binary_wr = cv2.threshold(
-                thresh_wr, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
-            )
-            contours_wr, _ = cv2.findContours(
-                binary_wr, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
-            )
-            if contours_wr:
-                largest = max(contours_wr, key=cv2.contourArea)
-                grid_rect = cv2.boundingRect(largest)
+# ---------------- Grid & Digit Extraction ----------------
 
-                def contour_inside_grid(c):
-                    x, y, w, h = grid_rect
-                    return any(
-                        x <= point[0][0] <= x + w and y <= point[0][1] <= y + h
-                        for point in c
-                    )
+def process(image: np.ndarray) -> dict:
+    logger = logging.getLogger('TreasureMaze')
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    _, bin_img = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    contours, hierarchy = cv2.findContours(bin_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours or hierarchy is None:
+        logger.error("No contours or missing hierarchy")
+        return {"cells": [], "digits": [], "est_rows": 0, "est_cols": 0}
+    hierarchy = hierarchy[0]
 
-                contours_wr_filtered = [
-                    c
-                    for c in contours_wr
-                    if cv2.contourArea(c) < cv2.contourArea(largest)
-                    and cv2.contourArea(c) > 200
-                    and contour_inside_grid(c)
-                ]
-                log(
-                    f"Grid debug: {len(contours_wr_filtered)} filtered contours.",
-                    "INFO",
-                )
-                
-                # cv2.drawContours(warped, contours_wr, -1, (255, 0, 0), 2)
-                # cv2.drawContours(warped, contours_wr_filtered, -1, (0, 255, 0), 2) 
-                # cv2.drawContours(warped, [largest], -1, (0, 0, 255), 2)
-                cv2.imshow("Grid Debug", warped)
-                cv2.waitKey(0)
-                cv2.destroyWindow("Grid Debug")
+    grid_contour = max(contours, key=cv2.contourArea)
+    max_area = cv2.contourArea(grid_contour)
+    grid_rect = cv2.boundingRect(grid_contour)
+    grid_idx = next((i for i, cnt in enumerate(contours)
+                    if abs(cv2.contourArea(cnt) - max_area) < 1e-3), None)
+    if grid_idx is None:
+        logger.error("Grid contour index not found")
+        return {"cells": [], "digits": [], "est_rows": 0, "est_cols": 0}
 
-        # Process grid using utility function
-        grid_data = process_grid(warped)
-        if not grid_data["cells"]:
-            log("Unable to process the maze grid.", "ERROR")
+    cells = []
+    candidate_digits = []
+    debug_img = image.copy()
+
+    for i, cnt in enumerate(contours):
+        if i == grid_idx:
+            continue
+        area = cv2.contourArea(cnt)
+        if area < 100 or area > 0.1 * max_area:
+            continue
+        x, y, w, h = cv2.boundingRect(cnt)
+        if w < 10 or h < 10:
+            continue
+        if hierarchy[i][3] == grid_idx:
+            cells.append((x, y, w, h))
+            cv2.rectangle(debug_img, (x, y), (x+w, y+h), (0, 0, 255), 2)
         else:
-            log(f"Analyzed cells: {len(grid_data['cells'])}", "INFO")
-            log(f"Estimated grid size: {grid_data['rows']}x{grid_data['cols']}", "INFO")
+            candidate_digits.append((x, y, w, h))
+    
+    # Optimize cell filtering using list comprehension
+    filtered_cells = [cell for i, cell in enumerate(cells)
+                      if not any(i != j and contains(cell, cells[j]) for j in range(len(cells)))]
+    
+    cells = filtered_cells
+    rows, cols = estimate_grid_size(grid_rect, cells)
+    expected_cells = rows * cols
+    if expected_cells == 0:
+        logger.warning("Estimated grid size is 0, falling back to candidate digits")
+    elif len(cells) < expected_cells:
+        logger.warning(f"Cells detected: {len(cells)}; expected ~{expected_cells}")
 
-        # Extract digits: crop, pad, and resize each cell for EMNIST recognition
-        padding = 15
-        digits = []
-        for cell in grid_data["cells"]:
-            if "digit_rect" in cell:
-                x, y, w, h = cell["digit_rect"]
-                roi = warped[max(y, 0) : y + h, max(x, 0) : x + w]
-                roi = cv2.copyMakeBorder(
-                    roi,
-                    padding,
-                    padding,
-                    padding,
-                    padding,
-                    cv2.BORDER_CONSTANT,
-                    value=(255, 255, 255),
-                )
-                roi = cv2.resize(roi, (28, 28))
-                roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-                _, roi_thresh = cv2.threshold(roi, 100, 255, cv2.THRESH_BINARY)
-                # Apply slight blur for natural appearance (TODO - test if the dataset recognizes this better than without)
-                # roi_thresh = cv2.GaussianBlur(roi_thresh, (3, 3), 0)
-                # digits.append(roi_thresh)
-                # cv2.imshow("Digit", roi_thresh)
-                # cv2.waitKey(0)
-                # cv2.destroyWindow("Digit")
+    final_digits = [rect for i, rect in enumerate(candidate_digits)
+                    if not any(i != j and contains(rect, candidate_digits[j])
+                               for j in range(len(candidate_digits)))]
+    
+    if rows == 0 or cols == 0:
+        if final_digits:
+            n = len(final_digits)
+            rows = int(math.sqrt(n)) or 1
+            cols = math.ceil(n / rows)
+            expected_cells = rows * cols
+            logger.info(f"Fallback grid estimated: {rows} rows x {cols} cols (digits detected: {n})")
+        else:
+            logger.error("No candidate digits detected for grid estimation")
+            return {"cells": cells, "digits": [], "est_rows": 0, "est_cols": 0}
 
-        if DEBUG:
-            # Visualize extracted digits in a grid layout
-            canvas = np.zeros(
-                (28 * grid_data["rows"], 28 * grid_data["cols"]), dtype=np.uint8
-            )
-            for i, digit in enumerate(digits):
-                row = i // grid_data["cols"]
-                col = i % grid_data["cols"]
-                canvas[row * 28 : row * 28 + 28, col * 28 : col * 28 + 28] = digit
-            cv2.imshow("Digits Grid", canvas)
-            cv2.waitKey(0)
-            cv2.destroyWindow("Digits Grid")
+    final_digits.sort(key=lambda r: r[1])
+    groups = [sorted(final_digits[i:i + cols], key=lambda r: r[0])
+              for i in range(0, len(final_digits), cols)]
+    grouped = [d for group in groups for d in group]
 
-        ## --- CHECKPOINT: Text recognition through EMNIST (and AIMA-Python) ---
-        log("Recognizing digits...", "INFO")
-        from keras import layers, regularizers, callbacks, utils
-        import tensorflow as tf
+    if expected_cells and len(grouped) != expected_cells:
+        logger.warning(f"Grouped digits: {len(grouped)}; expected: {expected_cells}")
+    else:
+        logger.info(f"Grouped {len(grouped)} digits with grid {rows}x{cols}")
+    
+    if logger.isEnabledFor(logging.DEBUG):
+        display_image(debug_img, "Cells (Red) and Digits (Green)")
+    
+    return {"cells": cells, "digits": grouped, "est_rows": rows, "est_cols": cols}
+
+# ---------------- Main ----------------
+
+def main():
+    parser = argparse.ArgumentParser(description="Treasure Maze Image Processor")
+    parser.add_argument("-d", "--debug", action="store_true", help="Show debug info")
+    parser.add_argument("-f", "--file", required=True, help="Path to image file")
+    args = parser.parse_args()
+
+    logger = setup_logger()
+    
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+        logger.debug(f"Debug {Fore.GREEN}enabled{Fore.RESET}!")
+    
+    warped = standardize(args.file)
+    if warped is None:
+        return 1
+    
+    result = process(warped)
+    
+    grid = np.zeros((28 * result["est_rows"], 28 * result["est_cols"]), dtype=np.uint8)
+    for i, rect in enumerate(result["digits"]):
+        digit_img = extract_digit(warped, rect)
+        row, col = divmod(i, result["est_cols"])
+        grid[row*28:(row+1)*28, col*28:(col+1)*28] = digit_img
+
+    if logger.isEnabledFor(logging.DEBUG):
+        display_image(grid, "Grid")
         
-        # Load the EMNIST model
-        model = tf.keras.models.load_model(os.path.join("model", "model.h5"))
-        
-        # attempt to recognize the digits
-        recognized = []
-        for digit in digits:
-            digit = cv2.bitwise_not(digit)
-            digit = np.expand_dims(digit, axis=-1)
-            digit = np.expand_dims(digit, axis=0)
-            prediction = model.predict(digit)
-            certainty = prediction.max()
-            recognized.append(chr(prediction.argmax() + 48))
-            print(f"Recognized: {chr(prediction.argmax() + 48)} (Certainty: {certainty:.4f})")
-        
-    except (ValueError, KeyboardInterrupt) as e:
-        log(f"Error: {e}", "ERROR")
-    finally:
-        cv2.destroyAllWindows()
-
+    logger.info("Exiting! 👋")
+    return 0
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else None)
+    exit(main())
