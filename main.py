@@ -21,7 +21,8 @@ ADAPTIVE_THRESH_C = 7
 
 def display_image(image: np.ndarray, title: str = "Image") -> None:
     cv2.imshow(title, image)
-    cv2.waitKey(0)
+    if cv2.waitKey(0) & 0xFF == ord('q'): # Press 'q' to quit
+        exit(0)
     cv2.destroyAllWindows()
 
 def check_blurriness(image: np.ndarray) -> float:
@@ -144,60 +145,96 @@ def standardize(file_path: str) -> np.ndarray:
 
 # ---------------- Grid & Digit Extraction ----------------
 
+def estimate_grid_size(grid_rect: tuple, cells: list) -> tuple:
+    # Estimate grid size based on the bounding rectangle and average cell size
+    if not cells:
+        return (0, 0)
+    avg_width = sum(cell[2] for cell in cells) / len(cells)
+    avg_height = sum(cell[3] for cell in cells) / len(cells)
+    _, _, grid_w, grid_h = grid_rect
+    rows = max(int(round(grid_h / avg_height)), 1)
+    cols = max(int(round(grid_w / avg_width)), 1)
+    return rows, cols
+
 def process(image: np.ndarray) -> dict:
     logger = logging.getLogger('TreasureMaze')
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    _, bin_img = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    _, bin_img = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    contours, hierarchy = cv2.findContours(bin_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours or hierarchy is None:
+        logger.error("No contours or missing hierarchy")
+        return {"cells": [], "digits": [], "est_rows": 0, "est_cols": 0}
+    hierarchy = hierarchy[0]
+
+    grid_contour = max(contours, key=cv2.contourArea)
+    max_area = cv2.contourArea(grid_contour)
+    grid_rect = cv2.boundingRect(grid_contour)
+    grid_idx = next((i for i, cnt in enumerate(contours)
+                    if abs(cv2.contourArea(cnt) - max_area) < 1e-3), None)
+    if grid_idx is None:
+        logger.error("Grid contour index not found")
+        return {"cells": [], "digits": [], "est_rows": 0, "est_cols": 0}
+
+    cells = []
+    candidate_digits = []
+    debug_img = image.copy()
+
+    for i, cnt in enumerate(contours):
+        if i == grid_idx:
+            continue
+        area = cv2.contourArea(cnt)
+        if area < 100 or area > 0.1 * max_area:
+            continue
+        x, y, w, h = cv2.boundingRect(cnt)
+        if w < 10 or h < 10:
+            continue
+        if hierarchy[i][3] == grid_idx:
+            cells.append((x, y, w, h))
+            cv2.rectangle(debug_img, (x, y), (x+w, y+h), (0, 0, 255), 2)
+        else:
+            candidate_digits.append((x, y, w, h))
     
-    # Find contours
-    contours, _ = cv2.findContours(bin_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        logger.error("No contours found")
-        return None
+    # Optimize cell filtering using list comprehension
+    filtered_cells = [cell for i, cell in enumerate(cells)
+                    if not any(i != j and contains(cell, cells[j]) for j in range(len(cells)))]
     
-    # Filter noise and exclude the largest contour (the grid)
-    contours = sorted(contours, key=cv2.contourArea, reverse=True)[1:]
-    contours = [c for c in contours if cv2.contourArea(c) > 100]
+    cells = filtered_cells
+    rows, cols = estimate_grid_size(grid_rect, cells)
+    expected_cells = rows * cols
+    if expected_cells == 0:
+        logger.warning("Estimated grid size is 0, falling back to candidate digits")
+    elif len(cells) < expected_cells:
+        logger.warning(f"Cells detected: {len(cells)}; expected ~{expected_cells}")
 
-    # Compute average contour height to determine a dynamic row threshold
-    heights = [cv2.boundingRect(c)[3] for c in contours]
-    avg_height = sum(heights) / len(heights) if heights else 0
-    row_threshold = int(avg_height * 0.5)  # Adjust multiplier as needed
-
-    # Sort by y-coordinate
-    contours = sorted(contours, key=lambda c: cv2.boundingRect(c)[1])
-    rows = []
-
-    for i, c in enumerate(contours):
-        x, y, w, h = cv2.boundingRect(c)
-        if i == 0 or not rows or y > rows[-1][0] - row_threshold:
-            rows.append([y + h, []])
-        rows[-1][1].append(c)
-
-    # Sort each row's contours from left to right
-    for row in rows:
-        row[1] = sorted(row[1], key=lambda c: cv2.boundingRect(c)[0])
-
-    # Flatten the list of contours
-    sorted_contours = [c for row in rows for c in row[1]]
-
-    # Open the image to remove noise
-    opened = cv2.morphologyEx(bin_img, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
-    rects = [cv2.boundingRect(c) for c in sorted_contours]
-
-    # Estimate grid size
-    est_rows = len(rows)
-    est_cols = max(len(row[1]) for row in rows)
-    logger.info(f"Estimated grid size: {est_cols}x{est_rows}")
-    test_img = cv2.cvtColor(opened, cv2.COLOR_GRAY2BGR)
-    test_cnt = cv2.drawContours(test_img, sorted_contours, -1, (0, 255, 0), 3)
+    final_digits = [rect for i, rect in enumerate(candidate_digits)
+                    if not any(i != j and contains(rect, candidate_digits[j])
+                            for j in range(len(candidate_digits)))]
     
+    if rows == 0 or cols == 0:
+        if final_digits:
+            n = len(final_digits)
+            rows = int(math.sqrt(n)) or 1
+            cols = math.ceil(n / rows)
+            expected_cells = rows * cols
+            logger.info(f"Fallback grid estimated: {rows} rows x {cols} cols (digits detected: {n})")
+        else:
+            logger.error("No candidate digits detected for grid estimation")
+            return {"cells": cells, "digits": [], "est_rows": 0, "est_cols": 0}
 
-    # ????????????????    
+    final_digits.sort(key=lambda r: r[1])
+    groups = [sorted(final_digits[i:i + cols], key=lambda r: r[0])
+            for i in range(0, len(final_digits), cols)]
+    grouped = [d for group in groups for d in group]
+
+    if expected_cells and len(grouped) != expected_cells:
+        logger.warning(f"Grouped digits: {len(grouped)}; expected: {expected_cells}")
+    else:
+        logger.info(f"Grouped {len(grouped)} digits with grid {rows}x{cols}")
     
-        
     if logger.isEnabledFor(logging.DEBUG):
-        display_image(test_img, "Bounding Rectangles")
+        display_image(debug_img, "Cells (Red) and Digits (Green)")
+    
+    return {"cells": cells, "digits": grouped, "est_rows": rows, "est_cols": cols}
 
         
 
