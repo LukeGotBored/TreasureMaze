@@ -1,2 +1,8 @@
-opencv-python>=4.0
+opencv-python>=4.0.0
 numpy
+tensorflow>=2.0.0
+tqdm
+colorama
+scikit-learn
+seaborn
+matplotlib
