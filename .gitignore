@@ -9,7 +9,7 @@ dist/
 aima-python/
 .python-version
 dataset/
-model/
+model/dataset/*
 logs/
 .vscode/
 _legacy/
