@@ -2,6 +2,8 @@
 import sys
 import os
 import logging
+import time
+from datetime import datetime
 from typing import List, Tuple, Optional
 
 from PyQt6 import QtCore, QtGui, QtWidgets
@@ -23,7 +25,6 @@ from PyQt6.QtWidgets import (
     QGraphicsView,
     QGraphicsScene,
     QMenuBar,
-    QSizePolicy,
     QMenu,
 )
 
@@ -33,7 +34,7 @@ except ImportError as e:
     logging.error("Error importing image processing functions: %s", e)
     raise
 
-# Region: Constants and Styles
+# region Constants
 CELL_SIZE = 50
 CONFIDENCE_HIGH = 0.9
 CONFIDENCE_MEDIUM = 0.7
@@ -42,7 +43,16 @@ IMAGE_PREVIEW_SIZE = (400, 400)
 BORDER_RADIUS = 6
 BUTTON_PADDING = "8px 16px"
 FONT_FAMILY = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont).family()
-MONOSPACE_FONT = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont).family() # TODO fix this
+MONOSPACE_FONT = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont).family()
+
+CONSOLE_STYLES = {
+    "info": "color: #89B4FA;",      
+    "success": "color: #A6E3A1;",   
+    "error": "color: #F38BA8;",     
+    "warning": "color: #FAB387;",   
+    "metric": "color: #CBA6F7;",    
+    "timestamp": "color: #9399B2;", 
+}
 
 logger = logging.getLogger("TreasureMazeGUI")
 logger.setLevel(logging.INFO)
@@ -197,9 +207,25 @@ LIGHT_MODE = {
 
 
 # region Worker and Processing Class Definitions
+def format_time(seconds: float) -> str:
+    """Format time duration in a human-readable way"""
+    if seconds < 0.001:
+        return f"{seconds*1000000:.0f}µs"
+    elif seconds < 1:
+        return f"{seconds*1000:.0f}ms"
+    else:
+        return f"{seconds:.2f}s"
+
+def console_format(text: str, style: str = None, include_timestamp: bool = True) -> str:
+    """Format text with HTML styling for console output"""
+    timestamp = f'<span style="{CONSOLE_STYLES["timestamp"]}">[{datetime.now().strftime("%H:%M:%S")}]</span> ' if include_timestamp else ""
+    if style:
+        return f'{timestamp}<span style="{CONSOLE_STYLES[style]}">{text}</span>'
+    return f'{timestamp}{text}'
+
 class WorkerSignals(QObject):
     progress = pyqtSignal(int)
-    result = pyqtSignal(list, int, int)
+    result = pyqtSignal(list, int, int, dict)  # Added timing_info parameter
     error = pyqtSignal(str)
     finished = pyqtSignal()
 
@@ -213,28 +239,58 @@ class ImageProcessingWorker(QRunnable):
 
     def run(self):
         try:
+            start_time = time.perf_counter()
             self.signals.progress.emit(10)
+            
+            # Load image timing
+            t0 = time.perf_counter()
             input_img = get_img(self.image_path)
+            load_time = time.perf_counter() - t0
             if input_img is None:
                 raise ValueError("Failed to load image")
             self.signals.progress.emit(30)
+
+            # Standardization timing
+            t0 = time.perf_counter()
             standardized = standardize(input_img)
+            standardize_time = time.perf_counter() - t0
             if standardized is None:
                 raise ValueError("Failed to standardize image")
             self.signals.progress.emit(50)
+
+            # Digit extraction timing
+            t0 = time.perf_counter()
             extracted = extract_digits(standardized)
+            extract_time = time.perf_counter() - t0
             if not extracted:
                 raise ValueError("No digits extracted")
             self.signals.progress.emit(70)
+
+            # Model prediction timing
+            t0 = time.perf_counter()
             model_path = os.path.join(os.getcwd(), "model", "out", "cnn.keras")
             if not os.path.exists(model_path):
                 raise FileNotFoundError(f"Model not found at {model_path}")
             predictions = predict_digit(extracted["digits"], model_path)
+            predict_time = time.perf_counter() - t0
+            
             self.signals.progress.emit(90)
+            total_time = time.perf_counter() - start_time
+            
+            # Add timing info to results
+            timing_info = {
+                "load": load_time,
+                "standardize": standardize_time,
+                "extract": extract_time,
+                "predict": predict_time,
+                "total": total_time,
+            }
+            
             self.signals.result.emit(
                 predictions,
                 extracted["grid"].get("rows", 0),
                 extracted["grid"].get("columns", 0),
+                timing_info,
             )
         except Exception as e:
             self.signals.error.emit(f"Processing error: {str(e)}")
@@ -256,6 +312,7 @@ class GridVisualizer(QGraphicsView):
         self.setRenderHints(QtGui.QPainter.RenderHint.Antialiasing)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
         self.placeholder_text = None
+        self.solution_items = []  # Track solution overlay items
         self._init_style()  # Renamed from apply_style() for clarity
         self.show_no_grid_message()
 
@@ -344,7 +401,33 @@ class GridVisualizer(QGraphicsView):
 
         if self.scene.items():
             self.update_grid([], 0, 0) #! This is really hacky, it'll delete the grid when changing themes, but to be fair it's 11pm and I'm tired    
-            
+
+    def clear_solution(self):
+        """Clear all solution overlay items"""
+        for item in self.solution_items:
+            self.scene.removeItem(item)
+        self.solution_items.clear()
+
+    def draw_solution_path(self, positions: List[Tuple[int, int]], current_step: int):
+        """Draw the solution path up to the current step"""
+        self.clear_solution()
+        if not positions:
+            return
+
+        pen = QtGui.QPen(QtGui.QColor("red"), 2)
+        centers = [
+            (pos[0] * CELL_SIZE + CELL_SIZE / 2, pos[1] * CELL_SIZE + CELL_SIZE / 2)
+            for pos in positions[:current_step + 1]
+        ]
+        
+        for i in range(len(centers) - 1):
+            line = QtWidgets.QGraphicsLineItem(
+                centers[i][0], centers[i][1], 
+                centers[i+1][0], centers[i+1][1]
+            )
+            line.setPen(pen)
+            self.scene.addItem(line)
+            self.solution_items.append(line)
 
 
 # region Main GUI Class
@@ -352,6 +435,13 @@ class TreasureMazeGUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.current_style = DARK_MODE
+        self.setup_state()
+        self.init_ui()
+        self.apply_styles()
+        self.setAcceptDrops(True)
+
+    def setup_state(self):
+        """Initialize all state variables"""
         self.image_path = ""
         self.thread_pool = QThreadPool()
         self.active_worker: Optional[ImageProcessingWorker] = None
@@ -364,9 +454,6 @@ class TreasureMazeGUI(QMainWindow):
         self.solution_overlay_items = []  # Overlay graphical items for the displayed solution
         self.btn_prev = None  # Initialize btn_prev
         self.btn_next = None  # Initialize btn_next
-        self.init_ui()
-        self.apply_styles()
-        self.setAcceptDrops(True)
 
     def init_ui(self):
         self.setWindowTitle("Treasure Maze Analyzer")
@@ -520,62 +607,42 @@ class TreasureMazeGUI(QMainWindow):
 
     def previous_move(self):
         if self.solution_positions and self.current_step_idx > 0:
-            self._update_navigation_buttons()
             self.current_step_idx -= 1
-            self.update_solution_overlay()
-        else:
-            print("Already at the first step")
-        self._update_navigation_buttons()
+            self.update_solution_display()
 
     def next_move(self):
         if self.solution_positions and self.current_step_idx < len(self.solution_positions) - 1:
             self.current_step_idx += 1
-            self.update_solution_overlay()
-        else:
-            print("Already at the final step")
-        self._update_navigation_buttons()
+            self.update_solution_display()
 
-    def update_solution_overlay(self):
-        # Remove previous overlay items
-        for item in self.solution_overlay_items:
-            self.grid_visualizer.scene.removeItem(item)
-        self.solution_overlay_items = []
-        if not self.solution_positions:
-            self.btn_prev.setEnabled(False)
-            self.btn_next.setEnabled(False)
-            self.btn_skip.setEnabled(False)
-            return
-        # Draw path from start up to current_step_idx as red lines
-        pen = QtGui.QPen(QtGui.QColor("red"), 2)
-        # Compute cell center positions (using CELL_SIZE)
-        centers = []
-        for pos in self.solution_positions[:self.current_step_idx + 1]:
-            x = pos[0] * CELL_SIZE + CELL_SIZE / 2
-            y = pos[1] * CELL_SIZE + CELL_SIZE / 2
-            centers.append((x, y))
-        # Draw lines between consecutive centers
-        for i in range(len(centers) - 1):
-            line = QtWidgets.QGraphicsLineItem(centers[i][0], centers[i][1], centers[i+1][0], centers[i+1][1])
-            line.setPen(pen)
-            self.grid_visualizer.scene.addItem(line)
-            self.solution_overlay_items.append(line)
+    def update_solution_display(self):
+        """Update the solution visualization"""
+        self.grid_visualizer.draw_solution_path(
+            self.solution_positions, 
+            self.current_step_idx
+        )
         self._update_navigation_buttons()
-
-    def _update_navigation_buttons(self):
-        if not self.solution_positions:
-            self.btn_prev.setEnabled(False)
-            self.btn_next.setEnabled(False)
-            self.btn_skip.setEnabled(False)
-        else:
-            self.btn_prev.setEnabled(self.current_step_idx > 0)
-            self.btn_next.setEnabled(self.current_step_idx < len(self.solution_positions) - 1)
-            self.btn_skip.setEnabled(self.current_step_idx < len(self.solution_positions) - 1)
 
     def goto_last_move(self):
         if self.solution_positions:
             self.current_step_idx = len(self.solution_positions) - 1
-            self.update_solution_overlay()
-            self._update_navigation_buttons()
+            self.update_solution_display()
+
+    def _update_navigation_buttons(self):
+        """Update navigation button states based on current position"""
+        has_solution = bool(self.solution_positions)
+        self.btn_prev.setEnabled(has_solution and self.current_step_idx > 0)
+        self.btn_next.setEnabled(has_solution and 
+                               self.current_step_idx < len(self.solution_positions) - 1)
+        self.btn_skip.setEnabled(has_solution and 
+                               self.current_step_idx < len(self.solution_positions) - 1)
+
+    def reset_solution(self):
+        """Reset all solution-related state"""
+        self.solution_positions = []
+        self.current_step_idx = 0
+        self.grid_visualizer.clear_solution()
+        self._update_navigation_buttons()
 
     def _create_menu(self):
         menu_bar = QMenuBar()
@@ -654,17 +721,14 @@ class TreasureMazeGUI(QMainWindow):
         if not self.image_path:
             self.show_error("No image selected")
             return
+
         self.console.clear()
         self.progress_bar.show()
         self.btn_process.setEnabled(False)
         self.btn_open.setEnabled(False)
         self.status_label.setText("Processing...")
 
-        # Clear solution-related attributes
-        self.solution_positions = []
-        self.current_step_idx = 0
-        self.solution_overlay_items = []
-        self._update_navigation_buttons()
+        self.reset_solution()
 
         self.active_worker = ImageProcessingWorker(self.image_path)
         self.active_worker.signals.progress.connect(self.progress_bar.setValue)
@@ -673,16 +737,29 @@ class TreasureMazeGUI(QMainWindow):
         self.active_worker.signals.finished.connect(self.processing_finished)
         self.thread_pool.start(self.active_worker)
 
-    def handle_results(self, predictions: list, rows: int, cols: int):
+    def handle_results(self, predictions: list, rows: int, cols: int, timing_info: dict):
         self.latest_predictions = predictions
         self.latest_rows = rows
         self.latest_cols = cols
         self.grid_visualizer.update_grid(predictions, rows, cols)
-        self.console.appendPlainText(
-            f"Processed {rows}x{cols} grid\n"
-            f"Identified {len(predictions)} numbers\n"
-            f"Confidence rate: {len(predictions)/(rows*cols)*100:.1f}%"
-        )
+        
+        # Enhanced console output with timing metrics
+        self.console.appendHtml(console_format("Analysis Complete", "success"))
+        self.console.appendHtml(console_format(f"Grid Size: {rows}x{cols}", "info"))
+        self.console.appendHtml(console_format(
+            f"Numbers Identified: {len(predictions)} " +
+            f"({len(predictions)/(rows*cols)*100:.1f}% confidence)", 
+            "info"
+        ))
+        
+        # Add timing information
+        self.console.appendHtml(console_format("\nTiming Metrics:", "metric"))
+        for op, duration in timing_info.items():
+            self.console.appendHtml(console_format(
+                f"  • {op.title()}: {format_time(duration)}", 
+                "metric"
+            ))
+        
         self.status_label.setText("Analysis complete")
         self.btn_play.setEnabled(bool(predictions) and bool(self.selected_algorithm))
 
@@ -690,29 +767,60 @@ class TreasureMazeGUI(QMainWindow):
         if not self.latest_predictions:
             self.show_error("No digit predictions available. Please analyze an image first.")
             return
+        
         self.status_label.setText(f"Calculating path using {self.selected_algorithm}")
         self.progress_bar.setValue(0)
         self.progress_bar.show()
         QApplication.processEvents()
+        
         try:
+            # Time the pathfinding operation
+            start_time = time.perf_counter()
             result = pathfind(
                 self.selected_algorithm,
                 self.latest_rows,
                 self.latest_cols,
                 self.latest_predictions
             )
+            duration = time.perf_counter() - start_time
+            
             sol = result.get("solution", [])
-            self.console.appendPlainText(f"Pathfinding result:\nSteps: {sol}\nCost: {result.get('cost')}\nLength: {result.get('length')}")
+            
+            # Enhanced console output for pathfinding results
+            self.console.appendHtml(console_format("\nPathfinding Results:", "success"))
+            self.console.appendHtml(console_format(
+                f"Algorithm: {self.selected_algorithm}", 
+                "info"
+            ))
+            self.console.appendHtml(console_format(
+                f"Time: {format_time(duration)}", 
+                "metric"
+            ))
+            self.console.appendHtml(console_format(
+                f"Path Cost: {result.get('cost')}", 
+                "info"
+            ))
+            self.console.appendHtml(console_format(
+                f"Path Length: {result.get('length')}", 
+                "info"
+            ))
             if sol:
+                self.console.appendHtml(console_format(
+                    f"Solution: {' → '.join(sol)}", 
+                    "success"
+                ))
                 self.solution_positions = self.compute_solution_positions(sol)
                 self.current_step_idx = 0
-                self.update_solution_overlay()
-                self.btn_prev.setEnabled(True)  # Enable the "previous" button
-                self.btn_next.setEnabled(True)  # Enable the "next" button
+                self.update_solution_display()
             else:
-                self.console.appendPlainText("No solution found.")
+                self.console.appendHtml(console_format(
+                    "No solution found", 
+                    "warning"
+                ))
+                
         except Exception as e:
             self.show_error(str(e))
+            
         self.progress_bar.setValue(100)
         self.status_label.setText("Ready")
         self.progress_bar.hide()
@@ -734,48 +842,6 @@ class TreasureMazeGUI(QMainWindow):
                 curr = (curr[0] + d[0], curr[1] + d[1])
                 positions.append(curr)
         return positions
-
-    def update_solution_overlay(self):
-        # Remove previous overlay items
-        for item in self.solution_overlay_items:
-            self.grid_visualizer.scene.removeItem(item)
-        self.solution_overlay_items = []
-        if not self.solution_positions:
-            self.btn_prev.setEnabled(False)
-            self.btn_next.setEnabled(False)
-            self.btn_skip.setEnabled(False)
-            return
-        # Draw path from start up to current_step_idx as red lines
-        pen = QtGui.QPen(QtGui.QColor("red"), 2)
-        # Compute cell center positions (using CELL_SIZE)
-        centers = []
-        for pos in self.solution_positions[:self.current_step_idx + 1]:
-            x = pos[0] * CELL_SIZE + CELL_SIZE / 2
-            y = pos[1] * CELL_SIZE + CELL_SIZE / 2
-            centers.append((x, y))
-        # Draw lines between consecutive centers
-        for i in range(len(centers) - 1):
-            line = QtWidgets.QGraphicsLineItem(centers[i][0], centers[i][1], centers[i+1][0], centers[i+1][1])
-            line.setPen(pen)
-            self.grid_visualizer.scene.addItem(line)
-            self.solution_overlay_items.append(line)
-        self._update_navigation_buttons()
-
-    def _update_navigation_buttons(self):
-        if not self.solution_positions:
-            self.btn_prev.setEnabled(False)
-            self.btn_next.setEnabled(False)
-            self.btn_skip.setEnabled(False)
-        else:
-            self.btn_prev.setEnabled(self.current_step_idx > 0)
-            self.btn_next.setEnabled(self.current_step_idx < len(self.solution_positions) - 1)
-            self.btn_skip.setEnabled(self.current_step_idx < len(self.solution_positions) - 1)
-
-    def goto_last_move(self):
-        if self.solution_positions:
-            self.current_step_idx = len(self.solution_positions) - 1
-            self.update_solution_overlay()
-            self._update_navigation_buttons()
 
     def select_algorithm(self):
         menu = QMenu(self)
@@ -801,7 +867,7 @@ class TreasureMazeGUI(QMainWindow):
         self.active_worker = None
 
     def show_error(self, message: str):
-        self.console.appendPlainText(f"[ERROR] {message}")
+        self.console.appendHtml(console_format(message, "error"))
         self.status_bar.showMessage(message, 5000)
         self.status_label.setText("Error")
         self.processing_finished()
