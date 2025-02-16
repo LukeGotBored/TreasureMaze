@@ -411,7 +411,7 @@ def main():
     if logger.isEnabledFor(logging.DEBUG):
         display_image(img_standard)
 
-    # logger.info(f"Predictions: {predicted_digits}")
+    logger.info(f"Predicted {len(predicted_digits)} digits ({len(predicted_digits) / (rows * columns) * 100:.2f}% of expected)")
     return 0
 
 
