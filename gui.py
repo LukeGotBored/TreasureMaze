@@ -24,10 +24,11 @@ from PyQt6.QtWidgets import (
     QGraphicsScene,
     QMenuBar,
     QSizePolicy,
+    QMenu,
 )
 
 try:
-    from main import get_img, standardize, extract_digits, predict_digit
+    from main import get_img, standardize, extract_digits, predict_digit, pathfind
 except ImportError as e:
     logging.error("Error importing image processing functions: %s", e)
     raise
@@ -52,6 +53,7 @@ DARK_MODE = {
     "primary": "#2b2b2b",
     "secondary": "#1e1e1e",
     "text": "#e0e0e0",
+    "border": "#454545",
     "button": """
         QPushButton {
             background-color: #3a3a3a;
@@ -126,6 +128,7 @@ LIGHT_MODE = {
     "primary": "#f0f0f0",
     "secondary": "#ffffff",
     "text": "#2b2b2b",
+    "border": "#d0d0d0",
     "button": """
         QPushButton {
             background-color: #ffffff;
@@ -352,6 +355,15 @@ class TreasureMazeGUI(QMainWindow):
         self.image_path = ""
         self.thread_pool = QThreadPool()
         self.active_worker: Optional[ImageProcessingWorker] = None
+        self.selected_algorithm = "BFS"
+        self.latest_predictions = []
+        self.latest_rows = 0
+        self.latest_cols = 0
+        self.solution_positions = []   # List of (col, row) on grid for the solution path
+        self.current_step_idx = 0      # Index into solution_positions for step-by-step display
+        self.solution_overlay_items = []  # Overlay graphical items for the displayed solution
+        self.btn_prev = None  # Initialize btn_prev
+        self.btn_next = None  # Initialize btn_next
         self.init_ui()
         self.apply_styles()
         self.setAcceptDrops(True)
@@ -407,16 +419,88 @@ class TreasureMazeGUI(QMainWindow):
         hbox = QHBoxLayout(btn_panel)
         hbox.setContentsMargins(5, 5, 5, 5)
         hbox.setSpacing(10)
+
+        # Add algorithm settings button
+        self.btn_algo = QPushButton("⚙️")
+        self.btn_algo.setToolTip("Select Algorithm")
+        self.btn_algo.setFixedSize(32, 32)
+        # change the style to remove the padding
+        self.btn_algo.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {self.current_style['primary']};
+                color: {self.current_style['text']};
+                border: 1px solid {self.current_style['border']};
+                border-radius: {BORDER_RADIUS}px;
+                padding: 0;
+            }}
+            QPushButton:hover {{
+                background-color: {self.current_style['secondary']};
+            }}
+        """)
+        self.btn_algo.clicked.connect(self.select_algorithm)
+        hbox.addWidget(self.btn_algo)
+
+        # Add play button
+        self.btn_play = QPushButton("▶️")
+        self.btn_play.setToolTip("Run Pathfinding")
+        self.btn_play.setFixedSize(32, 32)
+        self.btn_play.clicked.connect(self.run_pathfinding)
+        self.btn_play.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {self.current_style['primary']};
+                color: {self.current_style['text']};
+                border: 1px solid {self.current_style['border']};
+                border-radius: {BORDER_RADIUS}px;
+                padding: 0;
+            }}
+            QPushButton:hover {{
+                background-color: {self.current_style['secondary']};
+            }}
+        """)
+        self.btn_play.setEnabled(False)
+        
+        hbox.addWidget(self.btn_play)
+
         btn_prev = QPushButton("⬅️")
-        btn_prev.setToolTip("Previous move (placeholder)")
+        btn_prev.setToolTip("Previous move")
         btn_prev.setEnabled(False)
         btn_prev.clicked.connect(self.previous_move)
+        hbox.addWidget(btn_prev)
+        self.btn_prev = btn_prev # Assign to the class attribute
+
         btn_next = QPushButton("➡️")
-        btn_next.setToolTip("Next move (placeholder)")
+        btn_next.setToolTip("Next move")
         btn_next.setEnabled(False)
         btn_next.clicked.connect(self.next_move)
-        hbox.addWidget(btn_prev)
         hbox.addWidget(btn_next)
+        self.btn_next = btn_next # Assign to the class attribute
+
+        self.btn_skip = QPushButton("⏭️")
+        self.btn_skip.setToolTip("Go to last move")
+        self.btn_skip.setFixedSize(32, 32)
+        self.btn_skip.clicked.connect(self.goto_last_move)
+
+        self.btn_skip.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {self.current_style['primary']};
+                color: {self.current_style['text']};
+                border: 1px solid {self.current_style['border']};
+                border-radius: {BORDER_RADIUS}px;
+                padding: 0;
+            }}
+            QPushButton:hover {{
+                background-color: {self.current_style['secondary']};
+            }}
+            QPushButton:disabled {{
+                background-color: {self.current_style['primary']};
+                color: {self.current_style['text']};
+            }}
+        """)
+        self.btn_skip.setEnabled(False)
+
+        hbox.addWidget(self.btn_skip)
+
+
         grid_container_layout.addWidget(btn_panel)
         layout.addWidget(grid_container, 60)
         self.console = QPlainTextEdit()
@@ -435,10 +519,63 @@ class TreasureMazeGUI(QMainWindow):
         return panel
 
     def previous_move(self):
-        print("Previous move action triggered")
+        if self.solution_positions and self.current_step_idx > 0:
+            self._update_navigation_buttons()
+            self.current_step_idx -= 1
+            self.update_solution_overlay()
+        else:
+            print("Already at the first step")
+        self._update_navigation_buttons()
 
     def next_move(self):
-        print("Next move action triggered")
+        if self.solution_positions and self.current_step_idx < len(self.solution_positions) - 1:
+            self.current_step_idx += 1
+            self.update_solution_overlay()
+        else:
+            print("Already at the final step")
+        self._update_navigation_buttons()
+
+    def update_solution_overlay(self):
+        # Remove previous overlay items
+        for item in self.solution_overlay_items:
+            self.grid_visualizer.scene.removeItem(item)
+        self.solution_overlay_items = []
+        if not self.solution_positions:
+            self.btn_prev.setEnabled(False)
+            self.btn_next.setEnabled(False)
+            self.btn_skip.setEnabled(False)
+            return
+        # Draw path from start up to current_step_idx as red lines
+        pen = QtGui.QPen(QtGui.QColor("red"), 2)
+        # Compute cell center positions (using CELL_SIZE)
+        centers = []
+        for pos in self.solution_positions[:self.current_step_idx + 1]:
+            x = pos[0] * CELL_SIZE + CELL_SIZE / 2
+            y = pos[1] * CELL_SIZE + CELL_SIZE / 2
+            centers.append((x, y))
+        # Draw lines between consecutive centers
+        for i in range(len(centers) - 1):
+            line = QtWidgets.QGraphicsLineItem(centers[i][0], centers[i][1], centers[i+1][0], centers[i+1][1])
+            line.setPen(pen)
+            self.grid_visualizer.scene.addItem(line)
+            self.solution_overlay_items.append(line)
+        self._update_navigation_buttons()
+
+    def _update_navigation_buttons(self):
+        if not self.solution_positions:
+            self.btn_prev.setEnabled(False)
+            self.btn_next.setEnabled(False)
+            self.btn_skip.setEnabled(False)
+        else:
+            self.btn_prev.setEnabled(self.current_step_idx > 0)
+            self.btn_next.setEnabled(self.current_step_idx < len(self.solution_positions) - 1)
+            self.btn_skip.setEnabled(self.current_step_idx < len(self.solution_positions) - 1)
+
+    def goto_last_move(self):
+        if self.solution_positions:
+            self.current_step_idx = len(self.solution_positions) - 1
+            self.update_solution_overlay()
+            self._update_navigation_buttons()
 
     def _create_menu(self):
         menu_bar = QMenuBar()
@@ -523,6 +660,12 @@ class TreasureMazeGUI(QMainWindow):
         self.btn_open.setEnabled(False)
         self.status_label.setText("Processing...")
 
+        # Clear solution-related attributes
+        self.solution_positions = []
+        self.current_step_idx = 0
+        self.solution_overlay_items = []
+        self._update_navigation_buttons()
+
         self.active_worker = ImageProcessingWorker(self.image_path)
         self.active_worker.signals.progress.connect(self.progress_bar.setValue)
         self.active_worker.signals.result.connect(self.handle_results)
@@ -531,6 +674,9 @@ class TreasureMazeGUI(QMainWindow):
         self.thread_pool.start(self.active_worker)
 
     def handle_results(self, predictions: list, rows: int, cols: int):
+        self.latest_predictions = predictions
+        self.latest_rows = rows
+        self.latest_cols = cols
         self.grid_visualizer.update_grid(predictions, rows, cols)
         self.console.appendPlainText(
             f"Processed {rows}x{cols} grid\n"
@@ -538,6 +684,115 @@ class TreasureMazeGUI(QMainWindow):
             f"Confidence rate: {len(predictions)/(rows*cols)*100:.1f}%"
         )
         self.status_label.setText("Analysis complete")
+        self.btn_play.setEnabled(bool(predictions) and bool(self.selected_algorithm))
+
+    def run_pathfinding(self):
+        if not self.latest_predictions:
+            self.show_error("No digit predictions available. Please analyze an image first.")
+            return
+        self.status_label.setText(f"Calculating path using {self.selected_algorithm}")
+        self.progress_bar.setValue(0)
+        self.progress_bar.show()
+        QApplication.processEvents()
+        try:
+            result = pathfind(
+                self.selected_algorithm,
+                self.latest_rows,
+                self.latest_cols,
+                self.latest_predictions
+            )
+            sol = result.get("solution", [])
+            self.console.appendPlainText(f"Pathfinding result:\nSteps: {sol}\nCost: {result.get('cost')}\nLength: {result.get('length')}")
+            if sol:
+                self.solution_positions = self.compute_solution_positions(sol)
+                self.current_step_idx = 0
+                self.update_solution_overlay()
+                self.btn_prev.setEnabled(True)  # Enable the "previous" button
+                self.btn_next.setEnabled(True)  # Enable the "next" button
+            else:
+                self.console.appendPlainText("No solution found.")
+        except Exception as e:
+            self.show_error(str(e))
+        self.progress_bar.setValue(100)
+        self.status_label.setText("Ready")
+        self.progress_bar.hide()
+        self._update_navigation_buttons()
+
+    def compute_solution_positions(self, moves: list) -> list:
+        # Find the starting cell by looking for the first "S" in predictions.
+        start = (0, 0)
+        for idx, (label, _) in enumerate(self.latest_predictions):
+            if label == "S":
+                start = (idx % self.latest_cols, idx // self.latest_cols)
+                break
+        positions = [start]
+        curr = start
+        delta = {"UP": (0, -1), "DOWN": (0, 1), "LEFT": (-1, 0), "RIGHT": (1, 0)}
+        for act in moves:
+            d = delta.get(act)
+            if d:
+                curr = (curr[0] + d[0], curr[1] + d[1])
+                positions.append(curr)
+        return positions
+
+    def update_solution_overlay(self):
+        # Remove previous overlay items
+        for item in self.solution_overlay_items:
+            self.grid_visualizer.scene.removeItem(item)
+        self.solution_overlay_items = []
+        if not self.solution_positions:
+            self.btn_prev.setEnabled(False)
+            self.btn_next.setEnabled(False)
+            self.btn_skip.setEnabled(False)
+            return
+        # Draw path from start up to current_step_idx as red lines
+        pen = QtGui.QPen(QtGui.QColor("red"), 2)
+        # Compute cell center positions (using CELL_SIZE)
+        centers = []
+        for pos in self.solution_positions[:self.current_step_idx + 1]:
+            x = pos[0] * CELL_SIZE + CELL_SIZE / 2
+            y = pos[1] * CELL_SIZE + CELL_SIZE / 2
+            centers.append((x, y))
+        # Draw lines between consecutive centers
+        for i in range(len(centers) - 1):
+            line = QtWidgets.QGraphicsLineItem(centers[i][0], centers[i][1], centers[i+1][0], centers[i+1][1])
+            line.setPen(pen)
+            self.grid_visualizer.scene.addItem(line)
+            self.solution_overlay_items.append(line)
+        self._update_navigation_buttons()
+
+    def _update_navigation_buttons(self):
+        if not self.solution_positions:
+            self.btn_prev.setEnabled(False)
+            self.btn_next.setEnabled(False)
+            self.btn_skip.setEnabled(False)
+        else:
+            self.btn_prev.setEnabled(self.current_step_idx > 0)
+            self.btn_next.setEnabled(self.current_step_idx < len(self.solution_positions) - 1)
+            self.btn_skip.setEnabled(self.current_step_idx < len(self.solution_positions) - 1)
+
+    def goto_last_move(self):
+        if self.solution_positions:
+            self.current_step_idx = len(self.solution_positions) - 1
+            self.update_solution_overlay()
+            self._update_navigation_buttons()
+
+    def select_algorithm(self):
+        menu = QMenu(self)
+        algos = ["BFS", "DFS", "UCS", "Best First Graph", "A*"]
+        for algo in algos:
+            action = QAction(algo, self)
+            if algo == self.selected_algorithm:
+                action.setCheckable(True)
+                action.setChecked(True)
+            action.triggered.connect(lambda checked, a=algo: self.set_algorithm(a))
+            menu.addAction(action)
+        menu.exec(QtGui.QCursor.pos())
+
+    def set_algorithm(self, algo: str):
+        self.selected_algorithm = algo
+        self.status_label.setText(f"Selected Algorithm: {algo}")
+        self.btn_play.setEnabled(bool(self.latest_predictions) and bool(algo))
 
     def processing_finished(self):
         self.progress_bar.hide()
