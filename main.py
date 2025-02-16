@@ -369,15 +369,16 @@ def main():
     # parser.add_argument("-a", "--algorythm", required=True, help="Choose the type of algorythm for pathfinding")
 
     args = parser.parse_args()
-
-    # Setup logger
-    logger = setup_logger()
-    logger.setLevel(logging.INFO)
-    logger.info("Treasure Maze | Initializing...")
-
+    logger = setup_logger(args.debug)
     if args.debug:
         logger.setLevel(logging.DEBUG)
         logger.debug("Debug mode enabled!")
+    else:
+        logger.setLevel(logging.INFO)
+    
+    
+    logger.info("Treasure Maze | Initializing...")
+
 
     img = get_img(args.file)
     img_standard = standardize(img)
@@ -419,7 +420,7 @@ def main():
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":    
     try:
         exit(main())
     except KeyboardInterrupt:

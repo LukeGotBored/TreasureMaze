@@ -28,7 +28,7 @@ class RemoveColorFilter(logging.Filter):
         record.msg = self.ANSI_ESCAPE_PATTERN.sub('', str(record.msg))
         return True
 
-def setup_logger() -> logging.Logger:
+def setup_logger(debug: bool = False) -> logging.Logger:
     """Setup logging configuration with both file and console handlers."""
     try:
         os.makedirs(LOGS_DIR, exist_ok=True)
@@ -37,8 +37,12 @@ def setup_logger() -> logging.Logger:
         log_file = os.path.join(LOGS_DIR, f"treasure_maze_{timestamp}.log")
         
         logger = logging.getLogger('TreasureMaze')
-        logger.setLevel(logging.DEBUG)
-        
+        # Set level conditionally based on debug flag
+        if debug:
+            logger.setLevel(logging.DEBUG)
+        else:
+            logger.setLevel(logging.INFO)
+            
         # Prevent duplicate logging
         if not logger.handlers:
             # File handler
@@ -46,7 +50,6 @@ def setup_logger() -> logging.Logger:
             file_handler.setLevel(logging.DEBUG)
             file_format = logging.Formatter('[%(asctime)s] - %(levelname)s - %(message)s')
             file_handler.setFormatter(file_format)
-            # Aggiunta del filtro
             file_handler.addFilter(RemoveColorFilter())
             
             # Console handler
