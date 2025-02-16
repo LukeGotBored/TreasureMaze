@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from colorama import Fore, Style
 from datetime import datetime
 
@@ -20,6 +21,13 @@ class ColoredFormatter(logging.Formatter):
         formatter = logging.Formatter(log_fmt)
         return formatter.format(record)
 
+class RemoveColorFilter(logging.Filter):
+    ANSI_ESCAPE_PATTERN = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
+
+    def filter(self, record):
+        record.msg = self.ANSI_ESCAPE_PATTERN.sub('', str(record.msg))
+        return True
+
 def setup_logger() -> logging.Logger:
     """Setup logging configuration with both file and console handlers."""
     try:
@@ -38,6 +46,8 @@ def setup_logger() -> logging.Logger:
             file_handler.setLevel(logging.DEBUG)
             file_format = logging.Formatter('[%(asctime)s] - %(levelname)s - %(message)s')
             file_handler.setFormatter(file_format)
+            # Aggiunta del filtro
+            file_handler.addFilter(RemoveColorFilter())
             
             # Console handler
             console_handler = logging.StreamHandler()
