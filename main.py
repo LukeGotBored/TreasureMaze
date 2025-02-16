@@ -398,8 +398,9 @@ def main():
             idx = r * columns + c
             if idx < len(predicted_digits):
                 pred = predicted_digits[idx]
-                if pred is None:
-                    cell_output = "None"
+                if not pred or pred[0] == "Unknown":
+                    # fallback
+                    cell_output = "?"
                 else:
                     label_val, conf = pred[0], pred[1]
                     cell_output = f"{label_val} (c: {conf:.2f})"
