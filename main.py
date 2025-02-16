@@ -1,102 +1,3 @@
-<<<<<<< HEAD
-import cv2
-import math
-import numpy as np
-
-def show_image(img):
-   cv2.imshow("CV2", img)
-   cv2.waitKey(0)
-   cv2.destroyAllWindows()
-
-def get_next_cnt(h, i):
-   return int(h[0][i][0])
-
-def get_first_child(h, i):
-   return int(h[0][i][2])
-
-def estimate_grid_size(grid_rect, cells, n_cells):
-   avg_w = 0
-   avg_h = 0
-
-   for c in cells:
-      avg_w += c["rect"][2]
-      avg_h += c["rect"][3]
-
-   avg_w /= len(cells)
-   avg_h /= len(cells)
-
-   rows = math.floor(grid_rect[3] / avg_h)
-   columns = math.floor(n_cells / rows)
-
-   return (rows, columns)
-
-img = cv2.imread('samples/sample13.png')
-
-gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-blur = cv2.GaussianBlur(gray, (7, 7), 0)
-_, binary = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU) 
-
-show_image(binary)
-
-img_contours, hierarchy = cv2.findContours(binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-
-grid = img_contours[0]
-grid_rect = cv2.boundingRect(grid)
-
-print(grid_rect)
-
-cells = []
-
-global cell_scan
-cell_scan = get_first_child(hierarchy, 0)
-while cell_scan != -1:
-   
-   new_cell = {}
-   
-   new_cell["idx"] = cell_scan
-   new_cell["contour"] = img_contours[cell_scan]
-
-   cell_rect = cv2.boundingRect(img_contours[cell_scan])
-   cell_center = (math.floor(cell_rect[0] + cell_rect[2]/2), math.floor(cell_rect[1] + cell_rect[3]/2))
-
-   new_cell["rect"] = cell_rect
-   new_cell["center"] = cell_center
-
-   cells.append(new_cell)
-   
-   cell_scan = get_next_cnt(hierarchy, cell_scan)
-
-n_cells = len(cells)
-print(n_cells)
-
-grid_rows, grid_columns = estimate_grid_size(grid_rect, cells, n_cells)
-print(grid_rows, grid_columns)
-
-digits = [0 for i in range(0, n_cells)]
-
-for cell in cells:
-   
-   new_digit = {}
-
-   new_digit_idx = get_first_child(hierarchy, cell["idx"])
-
-   new_digit["idx"] = new_digit_idx
-   new_digit["contour"] = img_contours[new_digit_idx]
-   new_digit["rect"] = cv2.boundingRect(img_contours[new_digit_idx])
-
-   digit_row = math.floor((cell["center"][1] - grid_rect[1]) / grid_rect[3] * grid_rows) 
-   digit_column = math.floor((cell["center"][0] - grid_rect[0]) / grid_rect[2] * grid_columns)
-
-   digits[digit_row * grid_columns + digit_column] = new_digit
-
-print(len(digits))
-
-for digit in digits:
-   newImage = img.copy()  
-   cv2.drawContours(newImage, img_contours, digit["idx"], (0, 255, 0), 3)
-   #cv2.circle(newImage, cell["center"], 3, (0, 0, 255), 3)
-   show_image(newImage)
-=======
 import argparse
 import logging
 import os
@@ -105,7 +6,7 @@ import math
 import cv2
 import numpy as np
 from colorama import Fore, init
-from logger import setup_logger
+from logger import setup_logger # type: ignore
 import colorsys # imagine importing a whole library just for a single function, lol
 
 init(autoreset=True) #? this is to reset colorama colors after each print
@@ -114,7 +15,7 @@ init(autoreset=True) #? this is to reset colorama colors after each print
 MAX_SIZE = 1024                     
 MIN_BLUR_THRESHOLD = 100            
 ADAPTIVE_THRESH_BLOCK_SIZE = 57     
-ADAPTIVE_THRESH_C = 7               
+ADAPTIVE_THRESH_C = 7
 
 # ---------------- Utility Functions ----------------
 
@@ -127,20 +28,6 @@ def check_blurriness(image: np.ndarray) -> float:
     #? Source: https://www.pyimagesearch.com/2015/09/07/blur-detection-with-opencv/
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) > 2 else image
     return cv2.Laplacian(gray, cv2.CV_64F).var()
-
-def contains(r1: tuple, r2: tuple) -> bool:
-    x1, y1, w1, h1 = r1
-    x2, y2, w2, h2 = r2
-    return x1 >= x2 and y1 >= y2 and (x1 + w1) <= (x2 + w2) and (y1 + h1) <= (y2 + h2)
-
-def extract_digit(image: np.ndarray, rect: tuple) -> np.ndarray:
-    x, y, w, h = rect
-    d_img = image[y:y+h, x:x+w]
-    d_img = cv2.copyMakeBorder(d_img, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=0)
-    d_img = cv2.resize(d_img, (28, 28), interpolation=cv2.INTER_AREA)
-    if len(d_img.shape) == 3:
-        d_img = cv2.cvtColor(d_img, cv2.COLOR_BGR2GRAY)
-    return cv2.bitwise_not(d_img)
 
 # ---------------- Image Preprocessing Functions ----------------
 
@@ -196,8 +83,6 @@ def warp_image(thresh_image: np.ndarray) -> np.ndarray:
             logger.error("Could not find 4 corners")
             return None
             
-            
-            
         src_pts = approx.reshape(4, 2).astype(np.float32)
         rect = np.zeros((4, 2), dtype=np.float32)
         rect[0] = src_pts[np.argmin(src_pts.sum(axis=1))]      # top-left
@@ -205,7 +90,7 @@ def warp_image(thresh_image: np.ndarray) -> np.ndarray:
         rect[1] = src_pts[np.argmin(np.diff(src_pts, axis=1))]   # top-right
         rect[3] = src_pts[np.argmax(np.diff(src_pts, axis=1))]   # bottom-left
         
-        padding = 15
+        padding = 25
         w = int(max(np.linalg.norm(rect[0] - rect[1]), np.linalg.norm(rect[2] - rect[3]))) + 2 * padding
         h = int(max(np.linalg.norm(rect[1] - rect[2]), np.linalg.norm(rect[3] - rect[0]))) + 2 * padding
         
@@ -216,12 +101,12 @@ def warp_image(thresh_image: np.ndarray) -> np.ndarray:
             [padding, h - padding],
         ], dtype=np.float32)
         M = cv2.getPerspectiveTransform(rect, dst_pts)
-        return cv2.warpPerspective(cv2.cvtColor(thresh_image, cv2.COLOR_GRAY2BGR), M, (w, h))
+        return cv2.warpPerspective(thresh_image, M, (w, h))
     except Exception as e:
         logger.error(f"Warp error: {e}")
         return None
 
-def standardize(file_path: str) -> np.ndarray:
+def get_img(file_path: str) -> np.ndarray:
     logger = logging.getLogger('TreasureMaze')
     if not file_path or not os.path.exists(file_path):
         logger.error(f"Invalid file path: {file_path}")
@@ -230,75 +115,135 @@ def standardize(file_path: str) -> np.ndarray:
     if image is None:
         logger.error(f"Failed to load image: {file_path}")
         return None
-    processed = preprocess(image)
+    return image
+
+def standardize(img) -> np.ndarray:
+    logger = logging.getLogger('TreasureMaze')
+    processed = preprocess(img)
     if processed is None:
         logger.error("Image processing failed")
         return None
     warped = warp_image(processed)
     if warped is None:
         logger.error("Warp failed")
-        return None
+        return processed
     return warped
 
+def get_next_cnt(h, i):
+   return int(h[0][i][0])
 
-# ---------------- Grid & Digit Extraction ----------------
+def get_first_child(h, i):
+   return int(h[0][i][2])
 
-def process(image: np.ndarray) -> dict:
+def get_largest_child(h, contours, i=-1):
+    global child_scan, child_cnt
+
+    if i != -1:
+        child_scan = get_first_child(h, i)
+    else:
+        child_scan = 0
+
+    global largest_cnt
+    global largest_cnt_idx
+    global max_area
+    largest_cnt = []
+    largest_cnt_idx = 0
+    max_area = 0
+
+    while child_scan != -1:
+        child_cnt = contours[child_scan]
+        if cv2.contourArea(child_cnt) > max_area:
+            max_area = cv2.contourArea(child_cnt)
+            largest_cnt = child_cnt
+            largest_cnt_idx = child_scan
+        child_scan = get_next_cnt(h, child_scan) 
+    
+    return largest_cnt, largest_cnt_idx
+
+def estimate_grid_size(grid_rect, cells, n_cells):
+   avg_w = 0
+   avg_h = 0
+
+   for c in cells:
+      avg_w += c["rect"][2]
+      avg_h += c["rect"][3]
+
+   avg_w /= len(cells)
+   avg_h /= len(cells)
+
+   rows = math.floor(grid_rect[3] / avg_h)
+   columns = math.floor(n_cells / rows)
+
+   return (rows, columns)
+
+def extract_digits(img):
     logger = logging.getLogger('TreasureMaze')
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    _, bin_img = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+    img_contours, hierarchy = cv2.findContours(img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+    grid, grid_idx = get_largest_child(hierarchy, img_contours, -1)
+    grid_rect = cv2.boundingRect(grid)
+
+    newImage = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    cv2.drawContours(newImage, img_contours, grid_idx, (0, 255, 0), 3)
+    #cv2.circle(newImage, cell["center"], 3, (0, 0, 255), 3)
+    display_image(newImage)
+
+    cells = []
+
+    global cell_scan
+    cell_scan = get_first_child(hierarchy, grid_idx)
+    while cell_scan != -1:
+
+        #print("Area: ", cv2.contourArea(img_contours[cell_scan]))
+
+        if cv2.contourArea(img_contours[cell_scan]) > 1000:
     
-    # Find contours
-    contours, _ = cv2.findContours(bin_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        logger.error("No contours found")
-        return None
+            new_cell = {}
+            
+            new_cell["idx"] = cell_scan
+            new_cell["contour"] = img_contours[cell_scan]
+            cell_rect = cv2.boundingRect(img_contours[cell_scan])
+
+            cell_center = (math.floor(cell_rect[0] + cell_rect[2]/2), math.floor(cell_rect[1] + cell_rect[3]/2))
+
+            new_cell["rect"] = cell_rect
+            new_cell["center"] = cell_center
+
+            cells.append(new_cell)
+            
+        cell_scan = get_next_cnt(hierarchy, cell_scan)
+
+    n_cells = len(cells)
+    logger.info(f"Estimated cells: {n_cells}")
+
+    grid_rows, grid_columns = estimate_grid_size(grid_rect, cells, n_cells)
+    logger.info(f"Estimated size: {grid_rows} rows - {grid_columns} columns")
+
+    digits = [0 for i in range(0, n_cells)]
+
+    for cell in cells:
     
-    # Filter noise and exclude the largest contour (the grid)
-    contours = sorted(contours, key=cv2.contourArea, reverse=True)[1:]
-    contours = [c for c in contours if cv2.contourArea(c) > 100]
+        new_digit = {}
 
-    # Compute average contour height to determine a dynamic row threshold
-    heights = [cv2.boundingRect(c)[3] for c in contours]
-    avg_height = sum(heights) / len(heights) if heights else 0
-    row_threshold = int(avg_height * 0.5)  # Adjust multiplier as needed
+        digit_cnt, digit_idx = get_largest_child(hierarchy, img_contours, cell["idx"])
 
-    # Sort by y-coordinate
-    contours = sorted(contours, key=lambda c: cv2.boundingRect(c)[1])
-    rows = []
+        new_digit["idx"] = digit_idx
+        new_digit["contour"] = digit_cnt
+        new_digit["rect"] = cv2.boundingRect(digit_cnt)
 
-    for i, c in enumerate(contours):
-        x, y, w, h = cv2.boundingRect(c)
-        if i == 0 or not rows or y > rows[-1][0] - row_threshold:
-            rows.append([y + h, []])
-        rows[-1][1].append(c)
+        digit_row = math.floor((cell["center"][1] - grid_rect[1]) / grid_rect[3] * grid_rows) 
+        digit_column = math.floor((cell["center"][0] - grid_rect[0]) / grid_rect[2] * grid_columns)
 
-    # Sort each row's contours from left to right
-    for row in rows:
-        row[1] = sorted(row[1], key=lambda c: cv2.boundingRect(c)[0])
+        digits[digit_row * grid_columns + digit_column] = new_digit
 
-    # Flatten the list of contours
-    sorted_contours = [c for row in rows for c in row[1]]
+    logger.info(f"Found digits: {len(digits)}")
 
-    # Open the image to remove noise
-    opened = cv2.morphologyEx(bin_img, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
-    rects = [cv2.boundingRect(c) for c in sorted_contours]
-
-    # Estimate grid size
-    est_rows = len(rows)
-    est_cols = max(len(row[1]) for row in rows)
-    logger.info(f"Estimated grid size: {est_cols}x{est_rows}")
-    test_img = cv2.cvtColor(opened, cv2.COLOR_GRAY2BGR)
-    test_cnt = cv2.drawContours(test_img, sorted_contours, -1, (0, 255, 0), 3)
-    
-
-    # ????????????????    
-    
-        
-    if logger.isEnabledFor(logging.DEBUG):
-        display_image(test_img, "Bounding Rectangles")
-
-        
+    for digit in digits:
+        newImage = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        cv2.drawContours(newImage, img_contours, digit["idx"], (0, 255, 0), 3)
+        #cv2.circle(newImage, cell["center"], 3, (0, 0, 255), 3)
+        display_image(newImage)
 
 # ---------------- Main ----------------
 
@@ -316,7 +261,7 @@ def main():
     parser = argparse.ArgumentParser(description="Treasure Maze Image Processor")
     parser.add_argument("-d", "--debug", action="store_true", help="Show debug info")
     parser.add_argument("-f", "--file", required=True, help="Path to image file")
-    parser.add_argument("-m", "--model", required=True, help="Path to trained model")
+    #parser.add_argument("-m", "--model", required=True, help="Path to trained model")
     args = parser.parse_args()
 
     logger = setup_logger()
@@ -325,57 +270,15 @@ def main():
         logger.setLevel(logging.DEBUG)
         logger.debug(f"Debug {Fore.GREEN}enabled{Fore.RESET}!")
     
-    warped = standardize(args.file)
-    if warped is None:
+    img = get_img(args.file)
+    img_standard = standardize(img)
+
+    if img_standard is None:
         return 1
     
-    result = process(warped)
-    digits = []
-    
-    grid = np.zeros((28 * result["est_rows"], 28 * result["est_cols"]), dtype=np.uint8)
-    for i, rect in enumerate(result["digits"]):
-        digit_img = extract_digit(warped, rect)
-        digit_emn = cv2.bitwise_not(digit_img)
-        digit_emn = cv2.flip(digit_emn, 1)
-        digit_emn = cv2.rotate(digit_emn, cv2.ROTATE_90_COUNTERCLOCKWISE)
-        digits.append(digit_emn)
-        row, col = divmod(i, result["est_cols"])
-        grid[row*28:(row+1)*28, col*28:(col+1)*28] = digit_img
-
-    if logger.isEnabledFor(logging.DEBUG):
-        display_image(grid, "Grid")
-        
-    
-    # Now, let's load the model and predict the digits
-    import tensorflow as tf
-    from keras import models
-    import math
-        
-    if(not os.path.exists(args.model)):
-        logger.error(f"Model file not found: {args.model}")
-        return 1
-    
-    logger.info(f"Loading model from {args.model}")
-    model = models.load_model(args.model)
-    logger.info("Model loaded successfully!")
-    
-    
-    predictions = []
-    for i, digit in enumerate(digits):
-        digit = digit.reshape(1, 28, 28, 1)
-        prediction = model.predict(digit)
-        pred_label = np.argmax(prediction)
-        predictions.append(label_map[pred_label])
-        logger.info(f"PREDICTION {i+1}: {label_map[pred_label]}")
-        
-
-    logger.info(f"Predictions: {predictions}")
-    
-    
-    
-    logger.info("Exiting! 👋")
+    display_image(img_standard)
+    extract_digits(img_standard)
     return 0
-
+        
 if __name__ == "__main__":
     exit(main())
->>>>>>> parent of b2ca21f (rollback to previous digit detection method)
