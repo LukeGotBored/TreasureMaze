@@ -5,7 +5,6 @@ import math
 import cv2
 import numpy as np
 from colorama import Fore, init
-import colorsys
 
 import tensorflow as tf
 from keras import models
@@ -367,12 +366,14 @@ def main():
     parser.add_argument("-d", "--debug", action="store_true", help="Show debug info")
     parser.add_argument("-f", "--file", required=True, help="Path to image file")
     parser.add_argument("-m", "--model", required=True, help="Path to trained model")
+    # parser.add_argument("-a", "--algorythm", required=True, help="Choose the type of algorythm for pathfinding")
 
     args = parser.parse_args()
 
     # Setup logger
     logger = setup_logger()
     logger.setLevel(logging.INFO)
+    logger.info("Treasure Maze | Initializing...")
 
     if args.debug:
         logger.setLevel(logging.DEBUG)
@@ -382,8 +383,10 @@ def main():
     img_standard = standardize(img)
 
     if img_standard is None:
+        logger.error("Failed to standardize image")
         return 1
 
+    logger.info("Image standardized, attempting to extract digits...")
     extracted = extract_digits(img_standard)
     predicted_digits = predict_digit(extracted["digits"], args.model)
     grid_info = extracted.get("grid", {})
