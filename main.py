@@ -402,7 +402,14 @@ def main():
                     cell_output = "None"
                 else:
                     label_val, conf = pred[0], pred[1]
-                    cell_output = f"{label_val} (c: {conf:.2f})"
+                    # Color the confidence based on thresholds
+                    if conf >= 0.8:
+                        color = Fore.GREEN
+                    elif conf >= 0.5:
+                        color = Fore.YELLOW
+                    else:
+                        color = Fore.RED
+                    cell_output = f"{label_val} ({color}c: {conf:.2f}{Fore.RESET})"
             else:
                 cell_output = "N/A"
             row_predictions.append(cell_output)
@@ -411,7 +418,6 @@ def main():
     if logger.isEnabledFor(logging.DEBUG):
         display_image(img_standard)
 
-    # logger.info(f"Predictions: {predicted_digits}")
     return 0
 
 
