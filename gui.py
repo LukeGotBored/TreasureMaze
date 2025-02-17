@@ -471,7 +471,7 @@ class TreasureMazeGUI(QMainWindow):
                                             QtWidgets.QSizePolicy.Policy.Expanding)
         grid_container_layout.addWidget(self.grid_visualizer)
         
-        # Create a dedicated container for the treasure slider (one line) and insert into grid container.
+        # Create a dedicated container for the treasure slider (one line) and insert into grid container
         treasure_container = QWidget()
         treasure_layout = QHBoxLayout(treasure_container)
         treasure_layout.setContentsMargins(5, 5, 5, 0)
@@ -523,7 +523,7 @@ class TreasureMazeGUI(QMainWindow):
         treasure_layout.addWidget(self.treasure_slider)
         treasure_layout.addWidget(self.treasure_value_label)
         treasure_layout.addStretch()
-        # Insert the treasure container at the top (left-aligned) within the grid container layout.
+        # Insert the treasure container at the top (left-aligned) within the grid container layout
         grid_container_layout.insertWidget(0, treasure_container, 0, Qt.AlignmentFlag.AlignCenter)
         
         # Create the button panel (for algorithm settings, play and navigation buttons)
@@ -674,7 +674,7 @@ class TreasureMazeGUI(QMainWindow):
         open_action.triggered.connect(self.open_file_dialog)
         file_menu.addAction(open_action)
 
-        # Removed theme menu creation.
+        # Removed theme menu creation
         self.setMenuBar(menu_bar)
 
     def apply_styles(self):

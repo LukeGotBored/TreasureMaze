@@ -78,7 +78,6 @@ def test_random_sample(model, test_images, test_labels, model_name, logger_insta
     idx = random.randint(0, test_images.shape[0] - 1)
     sample_image = test_images[idx : idx + 1]
     actual_label = int(test_labels[idx])
-    # Use cached tf.function for prediction
     predict_fn = get_predict_fn(model)
     pred_probs = predict_fn(sample_image)
     pred_class = int(np.argmax(pred_probs, axis=1)[0])
@@ -230,7 +229,7 @@ def main():
             verbose=1,
         )
 
-    # Build and train MLP model and output evaluation results.
+    # Build and train MLP model and output evaluation results
     logger_instance.info("Building and training MLP...")
     mlp = build_mlp(train_images.shape[1:], num_classes, use_batchnorm=args.use_batchnorm)
     mlp_callbacks = [early_stopping] if early_stopping else []
@@ -246,7 +245,7 @@ def main():
     mlp_loss, mlp_acc = mlp.evaluate(test_images, test_labels, verbose=0)
     logger_instance.info(f"MLP Final Results -> Loss: {mlp_loss:.4f}, Accuracy: {mlp_acc:.4f}")
 
-    # Build and train CNN model and output evaluation results.
+    # Build and train CNN model and output evaluation results
     logger_instance.info("Building and training CNN...")
     cnn = build_cnn(train_images.shape[1:], num_classes, use_batchnorm=args.use_batchnorm)
     cnn_callbacks = [early_stopping] if early_stopping else []
@@ -262,12 +261,12 @@ def main():
     cnn_loss, cnn_acc = cnn.evaluate(test_images, test_labels, verbose=0)
     logger_instance.info(f"CNN Final Results -> Loss: {cnn_loss:.4f}, Accuracy: {cnn_acc:.4f}")
 
-    # Test model predictions on a random test sample.
+    # Test model predictions on a random test sample
     logger_instance.info("Testing a random sample from the test set:")
     test_random_sample(mlp, test_images, test_labels, "MLP", logger_instance)
     test_random_sample(cnn, test_images, test_labels, "CNN", logger_instance)
 
-    # Save models interactively based on user input.
+    # Save models interactively based on user input
     choice = input("Would you like to save the models? (y for both, m for MLP, c for CNN): ").strip().lower()
     model_actions = {"y": [("mlp", mlp), ("cnn", cnn)], "m": [("mlp", mlp)], "c": [("cnn", cnn)]}
     if choice in model_actions:
@@ -278,7 +277,7 @@ def main():
     else:
         print("Models not saved.")
 
-    # Plot confusion matrix for the CNN predictions along with training curves.
+    # Plot confusion matrix for the CNN predictions along with training curves
     logger_instance.info("Calculating confusion matrix for the CNN model...")
     predict_fn = get_predict_fn(cnn)
     predictions = np.argmax(predict_fn(test_images), axis=1)

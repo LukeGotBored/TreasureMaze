@@ -149,9 +149,8 @@ def standardize(img) -> np.ndarray:
 
 # region Digit Extraction
 # Extract digits from the standardized image and prepare them for prediction.
-
-# New helper to safely get bounding rectangle
 def safe_boundingRect(contour):
+    # tldr this function handles the case where the height of the bounding rectangle is zero
     try:
         rect = cv2.boundingRect(contour)
         # Guard against division by zero if height is 0.
@@ -196,12 +195,10 @@ def get_largest_child(h, contours, i=-1):
     return largest_cnt, largest_cnt_idx
 
 def estimate_grid_size(grid_rect, cells, n_cells):
-    # Guard against division by zero if no cells were extracted
     if len(cells) == 0:
         return (0, 0)
     avg_w = sum(c["rect"][2] for c in cells) / len(cells)
     avg_h = sum(c["rect"][3] for c in cells) / len(cells)
-    # Guard against avg_h being zero
     if avg_h == 0:
         return (0, 0)
     rows = math.floor(grid_rect[3] / avg_h)
