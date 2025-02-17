@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
     QGraphicsScene,
     QMenuBar,
     QMenu,
+    QSpinBox
 )
 
 try:
@@ -47,7 +48,7 @@ MONOSPACE_FONT = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont).fa
 
 # Styled console output colors using Catppuccin Mocha palette
 CONSOLE_STYLES = {
-    "info": "color: #89B4FA;",      # Blue
+    "info": "color: #89B4FA;",       # Blue
     "success": "color: #A6E3A1;",    # Green
     "error": "color: #F38BA8;",      # Red
     "warning": "color: #FAB387;",    # Peach
@@ -388,6 +389,7 @@ class TreasureMazeGUI(QMainWindow):
         self.solution_overlay_items = []  # Overlay graphical items for the displayed solution
         self.btn_prev = None  # Initialize btn_prev
         self.btn_next = None  # Initialize btn_next
+        self.treasure_spin = None
 
     def init_ui(self):
         self.setWindowTitle("Treasure Maze Analyzer")
@@ -436,6 +438,52 @@ class TreasureMazeGUI(QMainWindow):
         self.grid_visualizer = GridVisualizer()
         self.grid_visualizer.setMinimumSize(400, 300)
         grid_container_layout.addWidget(self.grid_visualizer)
+        
+        # Create a dedicated container to host the treasure spinbox at the top left
+        spinbox_container = QWidget()
+        spinbox_layout = QHBoxLayout(spinbox_container)
+        spinbox_layout.setContentsMargins(5, 5, 5, 0)  # slight margin for separation
+        # Define the treasure label and spinbox once here
+        self.treasure_label = QLabel("Treasures:")
+        self.treasure_label.setStyleSheet(f"color: {self.current_style['text']};")
+        self.treasure_label.hide()
+        self.treasure_spin = QSpinBox()
+        self.treasure_spin.setRange(0, 0)
+        self.treasure_spin.hide()
+        self.treasure_spin.setToolTip("Select treasures to find")
+        self.treasure_spin.setStyleSheet(f"""
+            QSpinBox {{
+                background-color: {self.current_style['primary']};
+                color: {self.current_style['text']};
+                border: 1px solid {self.current_style['border']};
+                border-radius: {BORDER_RADIUS}px;
+                max-width: 120px;
+                padding: 2px;
+            }}
+            QSpinBox::up-button {{
+                subcontrol-origin: border;
+                subcontrol-position: top right;
+                width: 16px;
+                border: none;
+                background-color: #707070;
+            }}
+            QSpinBox::down-button {{
+                subcontrol-origin: border;
+                subcontrol-position: bottom right;
+                width: 16px;
+                border: none;
+                background-color: #707070;
+            }}
+            QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
+                background-color: #808080;
+            }}
+        """)
+        spinbox_layout.addWidget(self.treasure_label)
+        spinbox_layout.addWidget(self.treasure_spin)
+        spinbox_layout.addStretch()
+        grid_container_layout.insertWidget(0, spinbox_container, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        # End spinbox container insertion
+        # Create the button panel (for algorithm settings, play and navigation buttons)
         btn_panel = QWidget()
         hbox = QHBoxLayout(btn_panel)
         hbox.setContentsMargins(5, 5, 5, 5)
@@ -445,7 +493,6 @@ class TreasureMazeGUI(QMainWindow):
         self.btn_algo = QPushButton("⚙️")
         self.btn_algo.setToolTip("Select Algorithm")
         self.btn_algo.setFixedSize(32, 32)
-        # change the style to remove the padding
         self.btn_algo.setStyleSheet(f"""
             QPushButton {{
                 background-color: {self.current_style['primary']};
@@ -461,7 +508,6 @@ class TreasureMazeGUI(QMainWindow):
         self.btn_algo.clicked.connect(self.select_algorithm)
         hbox.addWidget(self.btn_algo)
 
-        # Add play button
         self.btn_play = QPushButton("▶️")
         self.btn_play.setToolTip("Run Pathfinding")
         self.btn_play.setFixedSize(32, 32)
@@ -479,7 +525,6 @@ class TreasureMazeGUI(QMainWindow):
             }}
         """)
         self.btn_play.setEnabled(False)
-        
         hbox.addWidget(self.btn_play)
 
         btn_prev = QPushButton("⬅️")
@@ -487,20 +532,19 @@ class TreasureMazeGUI(QMainWindow):
         btn_prev.setEnabled(False)
         btn_prev.clicked.connect(self.previous_move)
         hbox.addWidget(btn_prev)
-        self.btn_prev = btn_prev # Assign to the class attribute
+        self.btn_prev = btn_prev
 
         btn_next = QPushButton("➡️")
         btn_next.setToolTip("Next move")
         btn_next.setEnabled(False)
         btn_next.clicked.connect(self.next_move)
         hbox.addWidget(btn_next)
-        self.btn_next = btn_next # Assign to the class attribute
+        self.btn_next = btn_next
 
         self.btn_skip = QPushButton("⏭️")
         self.btn_skip.setToolTip("Go to last move")
         self.btn_skip.setFixedSize(32, 32)
         self.btn_skip.clicked.connect(self.goto_last_move)
-
         self.btn_skip.setStyleSheet(f"""
             QPushButton {{
                 background-color: {self.current_style['primary']};
@@ -518,9 +562,7 @@ class TreasureMazeGUI(QMainWindow):
             }}
         """)
         self.btn_skip.setEnabled(False)
-
         hbox.addWidget(self.btn_skip)
-
 
         grid_container_layout.addWidget(btn_panel)
         layout.addWidget(grid_container, 60)
@@ -686,6 +728,17 @@ class TreasureMazeGUI(QMainWindow):
                 "metric"
             ))
         
+        treasure_count = sum(1 for (label, _) in predictions if label == "T")
+        if treasure_count > 0:
+            # Set the range from 1 to treasure_count
+            self.treasure_spin.setRange(1, treasure_count)
+            self.treasure_spin.setValue(treasure_count)
+            self.treasure_spin.show()
+            self.treasure_label.show()  # Optional: show label if desired
+        else:
+            self.treasure_spin.hide()
+            self.treasure_label.hide()
+
         self.status_label.setText("Analysis complete")
         self.btn_play.setEnabled(bool(predictions) and bool(self.selected_algorithm))
 
@@ -707,7 +760,8 @@ class TreasureMazeGUI(QMainWindow):
                 self.selected_algorithm,
                 self.latest_rows,
                 self.latest_cols,
-                self.latest_predictions
+                self.latest_predictions,
+                treasures=self.treasure_spin.value()
             )
             duration = time.perf_counter() - start_time
             
