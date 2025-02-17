@@ -1,3 +1,6 @@
+# alla fine non abbiamo fatto il sito :)
+
+
 # region Imports
 import sys
 import os
@@ -135,6 +138,23 @@ DARK_MODE = {
     "confidence_low": "#D32F2F",
 }
 
+# Add this helper function after your imports and constants
+
+def apply_button_style(btn, style_dict, extra=""):
+    btn.setStyleSheet(f"""
+        QPushButton {{
+            background-color: {style_dict.get('primary', '#2b2b2b')};
+            color: {style_dict.get('text', '#e0e0e0')};
+            border: 1px solid {style_dict.get('border', '#454545')};
+            border-radius: {BORDER_RADIUS}px;
+            padding: 0;
+            {extra}
+        }}
+        QPushButton:hover {{
+            background-color: {style_dict.get('secondary', '#1e1e1e')};
+        }}
+    """)
+
 
 # region Worker and Processing Class Definitions
 def format_time(seconds: float) -> str:
@@ -196,7 +216,10 @@ class ImageProcessingWorker(QRunnable):
             extracted = extract_digits(standardized)
             extract_time = time.perf_counter() - t0
             if not extracted:
-                raise ValueError("No digits extracted")
+                self.signals.error.emit("No grid detected")
+                self.signals.finished.emit()
+                self.signals.progress.emit(100)
+                return
             self.signals.progress.emit(70)
 
             # Model prediction timing
@@ -226,7 +249,7 @@ class ImageProcessingWorker(QRunnable):
                 timing_info,
             )
         except Exception as e:
-            self.signals.error.emit(f"Processing error: {str(e)}")
+            self.signals.error.emit(f"{str(e)}")
         finally:
             self.signals.finished.emit()
             self.signals.progress.emit(100)
@@ -274,29 +297,33 @@ class GridVisualizer(QGraphicsView):
 
     def show_no_grid_message(self):
         self.scene.clear()
-        self.placeholder_text = self.scene.addText("No grid loaded")
-        self.placeholder_text.setDefaultTextColor(QColor(self.current_style["text"]))
+        self.placeholder_text = self.scene.addSimpleText("No grid loaded")
+        self.placeholder_text.setBrush(QColor(self.current_style["text"]))
         self.placeholder_text.setFont(QFont(FONT_FAMILY, 14))
         self._update_placeholder_position()
 
     def update_grid(self, predictions: List[Tuple[str, float]], rows: int, cols: int):
-        self.scene.clear()
-        self.placeholder_text = None
-        
-        if not predictions or rows == 0 or cols == 0:
-            self.show_no_grid_message()
-            return
+        try:
+            self.scene.clear()
+            self.placeholder_text = None
+            
+            if not predictions or rows == 0 or cols == 0:
+                self.show_no_grid_message()
+                return
 
-        # region Adding Cells to Grid
-        for i in range(rows):
-            for j in range(cols):
-                idx = i * cols + j
-                if idx >= len(predictions):
-                    continue
-                pred, confidence = predictions[idx]
-                text = pred if pred else "?"
-                self._add_cell(j, i, text, confidence)
-        self.setSceneRect(0, 0, cols * CELL_SIZE, rows * CELL_SIZE)
+            # region Adding Cells to Grid
+            for i in range(rows):
+                for j in range(cols):
+                    idx = i * cols + j
+                    if idx >= len(predictions):
+                        continue
+                    pred, confidence = predictions[idx]
+                    text = pred if pred else "?"
+                    self._add_cell(j, i, text, confidence)
+            self.setSceneRect(0, 0, cols * CELL_SIZE, rows * CELL_SIZE)
+        except Exception as ex:
+            logging.error("Error updating grid: %s", ex)
+            raise
 
     def _add_cell(self, x: int, y: int, text: str, confidence: float):
         # color = self._get_confidence_color(confidence) 
@@ -327,13 +354,16 @@ class GridVisualizer(QGraphicsView):
         return self.current_style["confidence_low"]
 
     def set_theme(self, style: dict):
-        # Removed the theme switching logic; now it only sets dark mode once.
-        self.current_style = style
-        self._init_style()
-        if self.placeholder_text:
-            self.placeholder_text.setDefaultTextColor(QColor(self.current_style["text"]))
-            self._update_placeholder_position()
-        self.update_grid([], 0, 0)
+        try:
+            self.current_style = style or DARK_MODE
+            self._init_style()
+            if self.placeholder_text:
+                self.placeholder_text.setBrush(QColor(self.current_style.get("text", "#e0e0e0")))
+                self._update_placeholder_position()
+            self.update_grid([], 0, 0)
+        except Exception as ex:
+            logging.error("Error in set_theme: %s", ex)
+            raise
 
     def clear_solution(self):
         """Clear all solution overlay items"""
@@ -433,97 +463,88 @@ class TreasureMazeGUI(QMainWindow):
         # region Grid Visualizer Area
         grid_container = QFrame()
         grid_container_layout = QVBoxLayout(grid_container)
-        grid_container_layout.setContentsMargins(0, 0, 0, 0)
+        grid_container_layout.setContentsMargins(10, 10, 10, 10)
         grid_container_layout.setSpacing(0)
         self.grid_visualizer = GridVisualizer()
         self.grid_visualizer.setMinimumSize(400, 300)
+        self.grid_visualizer.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
+                                            QtWidgets.QSizePolicy.Policy.Expanding)
         grid_container_layout.addWidget(self.grid_visualizer)
         
-        # Create a dedicated container to host the treasure spinbox at the top left
-        spinbox_container = QWidget()
-        spinbox_layout = QHBoxLayout(spinbox_container)
-        spinbox_layout.setContentsMargins(5, 5, 5, 0)  # slight margin for separation
-        # Define the treasure label and spinbox once here
-        self.treasure_label = QLabel("Treasures:")
-        self.treasure_label.setStyleSheet(f"color: {self.current_style['text']};")
-        self.treasure_label.hide()
-        self.treasure_spin = QSpinBox()
-        self.treasure_spin.setRange(0, 0)
-        self.treasure_spin.hide()
-        self.treasure_spin.setToolTip("Select treasures to find")
-        self.treasure_spin.setStyleSheet(f"""
-            QSpinBox {{
-                background-color: {self.current_style['primary']};
-                color: {self.current_style['text']};
-                border: 1px solid {self.current_style['border']};
-                border-radius: {BORDER_RADIUS}px;
-                max-width: 120px;
-                padding: 2px;
-            }}
-            QSpinBox::up-button {{
-                subcontrol-origin: border;
-                subcontrol-position: top right;
-                width: 16px;
-                border: none;
-                background-color: #707070;
-            }}
-            QSpinBox::down-button {{
-                subcontrol-origin: border;
-                subcontrol-position: bottom right;
-                width: 16px;
-                border: none;
-                background-color: #707070;
-            }}
-            QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
-                background-color: #808080;
-            }}
+        # Create a dedicated container for the treasure slider (one line) and insert into grid container.
+        treasure_container = QWidget()
+        treasure_layout = QHBoxLayout(treasure_container)
+        treasure_layout.setContentsMargins(5, 5, 5, 0)
+        # Shortened label to "T:"
+        self.treasure_label = QLabel("T:")
+        self.treasure_label.setStyleSheet("""
+            QLabel {
+                color: #e0e0e0;
+                font-weight: bold;
+                font-size: 14px;
+            }
         """)
-        spinbox_layout.addWidget(self.treasure_label)
-        spinbox_layout.addWidget(self.treasure_spin)
-        spinbox_layout.addStretch()
-        grid_container_layout.insertWidget(0, spinbox_container, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        # End spinbox container insertion
+        self.treasure_label.hide()
+        self.treasure_slider = QtWidgets.QSlider(Qt.Orientation.Horizontal)
+        self.treasure_slider.setMinimum(1)
+        self.treasure_slider.setMaximum(1)
+        self.treasure_slider.hide()
+        self.treasure_slider.setTickPosition(QtWidgets.QSlider.TickPosition.NoTicks)
+        self.treasure_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                height: 6px;
+                background: #505050;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                background: #4a4a4a;
+                border: 1px solid #707070;
+                width: 8px;
+                height: 8px;
+                margin: -5px 0;
+                border-radius: 8px;
+            }
+        """)
+        # Display numeric value as "current/maximum"
+        self.treasure_value_label = QLabel("1/1")
+        self.treasure_value_label.setStyleSheet("""
+            QLabel {
+                color: #e0e0e0;
+                font-size: 14px;
+                min-width: 40px;
+                text-align: left;
+            }
+        """)
+        self.treasure_value_label.hide()
+        self.treasure_slider.valueChanged.connect(
+            lambda val: self.treasure_value_label.setText(f"{val}/{self.treasure_slider.maximum()}")
+        )
+        treasure_layout.addWidget(self.treasure_label)
+        treasure_layout.addWidget(self.treasure_slider)
+        treasure_layout.addWidget(self.treasure_value_label)
+        treasure_layout.addStretch()
+        # Insert the treasure container at the top (left-aligned) within the grid container layout.
+        grid_container_layout.insertWidget(0, treasure_container, 0, Qt.AlignmentFlag.AlignCenter)
+        
         # Create the button panel (for algorithm settings, play and navigation buttons)
         btn_panel = QWidget()
         hbox = QHBoxLayout(btn_panel)
         hbox.setContentsMargins(5, 5, 5, 5)
         hbox.setSpacing(10)
 
-        # Add algorithm settings button
+        # Ensure self.btn_play is created:
         self.btn_algo = QPushButton("⚙️")
         self.btn_algo.setToolTip("Select Algorithm")
         self.btn_algo.setFixedSize(32, 32)
-        self.btn_algo.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {self.current_style['primary']};
-                color: {self.current_style['text']};
-                border: 1px solid {self.current_style['border']};
-                border-radius: {BORDER_RADIUS}px;
-                padding: 0;
-            }}
-            QPushButton:hover {{
-                background-color: {self.current_style['secondary']};
-            }}
-        """)
+        apply_button_style(self.btn_algo, self.current_style)
         self.btn_algo.clicked.connect(self.select_algorithm)
         hbox.addWidget(self.btn_algo)
 
         self.btn_play = QPushButton("▶️")
         self.btn_play.setToolTip("Run Pathfinding")
         self.btn_play.setFixedSize(32, 32)
+        apply_button_style(self.btn_play, self.current_style)
         self.btn_play.clicked.connect(self.run_pathfinding)
-        self.btn_play.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {self.current_style['primary']};
-                color: {self.current_style['text']};
-                border: 1px solid {self.current_style['border']};
-                border-radius: {BORDER_RADIUS}px;
-                padding: 0;
-            }}
-            QPushButton:hover {{
-                background-color: {self.current_style['secondary']};
-            }}
-        """)
         self.btn_play.setEnabled(False)
         hbox.addWidget(self.btn_play)
 
@@ -572,8 +593,34 @@ class TreasureMazeGUI(QMainWindow):
         layout.addWidget(self.console, 25)
         control_layout = QHBoxLayout()
         self.btn_open = QPushButton("📂 Open Image")
+        # Polished control button style for Open Image
+        self.btn_open.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {self.current_style['primary']};
+                color: {self.current_style['text']};
+                border: 1px solid {self.current_style['border']};
+                border-radius: {BORDER_RADIUS}px;
+                padding: 8px 16px;
+            }}
+            QPushButton:hover {{
+                background-color: {self.current_style['secondary']};
+            }}
+        """)
         self.btn_open.clicked.connect(self.open_file_dialog)
         self.btn_process = QPushButton("🔎 Analyze")
+        # Polished control button style for Analyze
+        self.btn_process.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {self.current_style['primary']};
+                color: {self.current_style['text']};
+                border: 1px solid {self.current_style['border']};
+                border-radius: {BORDER_RADIUS}px;
+                padding: 8px 16px;
+            }}
+            QPushButton:hover {{
+                background-color: {self.current_style['secondary']};
+            }}
+        """)
         self.btn_process.clicked.connect(self.start_processing)
         self.btn_process.setEnabled(False)
         control_layout.addWidget(self.btn_open)
@@ -635,6 +682,10 @@ class TreasureMazeGUI(QMainWindow):
             QMainWindow {{
                 background-color: {self.current_style['primary']};
                 color: {self.current_style['text']};
+                border-radius: {BORDER_RADIUS}px;
+            }}
+            QFrame, QWidget {{
+                border-radius: {BORDER_RADIUS}px;
             }}
             {self.current_style['button']}
             {self.current_style['console']}
@@ -705,42 +756,46 @@ class TreasureMazeGUI(QMainWindow):
         self.thread_pool.start(self.active_worker)
 
     def handle_results(self, predictions: list, rows: int, cols: int, timing_info: dict):
-        """Process and display image analysis results with timing metrics"""
-        self.latest_predictions = predictions
-        self.latest_rows = rows
-        self.latest_cols = cols
-        self.grid_visualizer.update_grid(predictions, rows, cols)
-        
-        # Enhanced console output with timing metrics
-        self.console.appendHtml(console_format("Analysis Complete", "success"))
-        self.console.appendHtml(console_format(f"Grid Size: {rows}x{cols}", "info"))
-        self.console.appendHtml(console_format(
-            f"Numbers Identified: {len(predictions)} " +
-            f"({len(predictions)/(rows*cols)*100:.1f}% confidence)", 
-            "info"
-        ))
-        
-        # Add timing information
-        self.console.appendHtml(console_format("\nTiming Metrics:", "metric"))
-        for op, duration in timing_info.items():
+        try:
+            self.latest_predictions = predictions
+            self.latest_rows = rows
+            self.latest_cols = cols
+            self.grid_visualizer.update_grid(predictions, rows, cols)
+            
+            self.console.appendHtml(console_format("Analysis Complete", "success"))
+            self.console.appendHtml(console_format(f"Grid Size: {rows}x{cols}", "info"))
+            total = rows * cols
+            percentage = (len(predictions) / total * 100) if total else 0
             self.console.appendHtml(console_format(
-                f"  • {op.title()}: {format_time(duration)}", 
-                "metric"
+                f"Numbers Identified: {len(predictions)} " +
+                f"({percentage:.1f}% confidence)", 
+                "info"
             ))
-        
-        treasure_count = sum(1 for (label, _) in predictions if label == "T")
-        if treasure_count > 0:
-            # Set the range from 1 to treasure_count
-            self.treasure_spin.setRange(1, treasure_count)
-            self.treasure_spin.setValue(treasure_count)
-            self.treasure_spin.show()
-            self.treasure_label.show()  # Optional: show label if desired
-        else:
-            self.treasure_spin.hide()
-            self.treasure_label.hide()
+            self.console.appendHtml(console_format("\nTiming Metrics:", "metric"))
+            for op, duration in timing_info.items():
+                self.console.appendHtml(console_format(
+                    f"  • {op.title()}: {format_time(duration)}", 
+                    "metric"
+                ))
+            
+            treasure_count = sum(1 for (label, _) in predictions if label == "T")
+            if treasure_count > 1:
+                self.treasure_slider.setMaximum(treasure_count)
+                self.treasure_slider.setValue(treasure_count)
+                self.treasure_slider.show()
+                self.treasure_label.show()
+                self.treasure_value_label.show()
+            else:
+                self.treasure_slider.hide()
+                self.treasure_label.hide()
+                self.treasure_value_label.hide()
 
-        self.status_label.setText("Analysis complete")
-        self.btn_play.setEnabled(bool(predictions) and bool(self.selected_algorithm))
+            self.status_label.setText("Analysis complete")
+            self.btn_play.setEnabled(bool(predictions) and bool(self.selected_algorithm))
+        except Exception as ex:
+            logging.error("Error in handle_results: %s", ex)
+            self.show_error("An error occurred while processing results.")
+            raise
 
     def run_pathfinding(self):
         """Execute selected pathfinding algorithm and visualize results"""
@@ -753,7 +808,7 @@ class TreasureMazeGUI(QMainWindow):
         self.progress_bar.show()
         QApplication.processEvents()
         
-        try:
+        try:    
             # Time the pathfinding operation
             start_time = time.perf_counter()
             result = pathfind(
@@ -761,7 +816,7 @@ class TreasureMazeGUI(QMainWindow):
                 self.latest_rows,
                 self.latest_cols,
                 self.latest_predictions,
-                treasures=self.treasure_spin.value()
+                treasures=self.treasure_slider.value() if self.treasure_slider.isVisible() else 1
             )
             duration = time.perf_counter() - start_time
             
@@ -830,7 +885,7 @@ class TreasureMazeGUI(QMainWindow):
 
     def select_algorithm(self):
         menu = QMenu(self)
-        algos = ["BFS", "DFS", "UCS", "Best First Graph", "A*"]
+        algos = ["BFS", "DFS", "UCS", "Best First", "A*"]
         for algo in algos:
             action = QAction(algo, self)
             if algo == self.selected_algorithm:
