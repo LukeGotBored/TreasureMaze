@@ -134,78 +134,6 @@ DARK_MODE = {
     "confidence_low": "#D32F2F",
 }
 
-LIGHT_MODE = {
-    "name": "light",
-    "primary": "#f0f0f0",
-    "secondary": "#ffffff",
-    "text": "#2b2b2b",
-    "border": "#d0d0d0",
-    "button": """
-        QPushButton {
-            background-color: #ffffff;
-            color: #2b2b2b;
-            border: 1px solid #d0d0d0;
-            border-radius: """
-    + str(BORDER_RADIUS)
-    + """px;
-            padding: """
-    + BUTTON_PADDING
-    + """;
-        }
-        QPushButton:hover {
-            background-color: #f8f8f8;
-            border-color: #c0c0c0;
-        }
-        QPushButton:pressed {
-            background-color: #e8e8e8;
-        }
-        QPushButton:disabled {
-            background-color: #f5f5f5;
-            color: #a0a0a0;
-        }
-    """,
-    "console": """
-        QPlainTextEdit {
-            background-color: #ffffff;
-            color: #2b2b2b;
-            border: 1px solid #d0d0d0;
-            border-radius: """
-    + str(BORDER_RADIUS)
-    + """px;
-            font-family: """
-    + MONOSPACE_FONT
-    + """;
-            font-size: 13px;
-            padding: 5px;
-        }
-    """,
-    "progress": """
-        QProgressBar {
-            border: none;
-            background: transparent;
-            height: 20px;
-            text-align: center;
-        }
-        QProgressBar::chunk {
-            background-color: #4a9eff;
-        }
-    """,
-    "panel": """
-        QFrame {
-            background-color: #ffffff;
-            border: none;
-            border-radius: """
-    + str(BORDER_RADIUS)
-    + """px;
-        }
-    """,
-    "grid_border": "none",
-    "grid_bg": "#ffffff",
-    "confidence_high": "#81C784",
-    "confidence_medium": "#FFB74D",
-    "confidence_low": "#E57373",
-}
-
 
 # region Worker and Processing Class Definitions
 def format_time(seconds: float) -> str:
@@ -398,14 +326,13 @@ class GridVisualizer(QGraphicsView):
         return self.current_style["confidence_low"]
 
     def set_theme(self, style: dict):
+        # Removed the theme switching logic; now it only sets dark mode once.
         self.current_style = style
-        self._init_style()  # Use the same method for consistency
+        self._init_style()
         if self.placeholder_text:
             self.placeholder_text.setDefaultTextColor(QColor(self.current_style["text"]))
             self._update_placeholder_position()
-
-        if self.scene.items():
-            self.update_grid([], 0, 0) #! This is really hacky, it'll delete the grid when changing themes, but to be fair it's 11pm and I'm tired    
+        self.update_grid([], 0, 0)
 
     def clear_solution(self):
         """Clear all solution overlay items"""
@@ -440,6 +367,7 @@ class TreasureMazeGUI(QMainWindow):
     """Main application window implementing the maze analysis interface"""
     def __init__(self):
         super().__init__()
+        # Force dark theme and remove references to light mode:
         self.current_style = DARK_MODE
         self.setup_state()
         self.init_ui()
@@ -639,9 +567,9 @@ class TreasureMazeGUI(QMainWindow):
         has_solution = bool(self.solution_positions)
         self.btn_prev.setEnabled(has_solution and self.current_step_idx > 0)
         self.btn_next.setEnabled(has_solution and 
-                               self.current_step_idx < len(self.solution_positions) - 1)
+                                self.current_step_idx < len(self.solution_positions) - 1)
         self.btn_skip.setEnabled(has_solution and 
-                               self.current_step_idx < len(self.solution_positions) - 1)
+                                self.current_step_idx < len(self.solution_positions) - 1)
 
     def reset_solution(self):
         """Reset all solution-related state"""
@@ -656,13 +584,8 @@ class TreasureMazeGUI(QMainWindow):
         open_action = QAction("Open...", self)
         open_action.triggered.connect(self.open_file_dialog)
         file_menu.addAction(open_action)
-        theme_menu = menu_bar.addMenu("&Theme")
-        dark_action = QAction("Dark Mode", self)
-        dark_action.triggered.connect(lambda: self.set_theme(DARK_MODE))
-        light_action = QAction("Light Mode", self)
-        light_action.triggered.connect(lambda: self.set_theme(LIGHT_MODE))
-        theme_menu.addAction(dark_action)
-        theme_menu.addAction(light_action)
+
+        # Removed theme menu creation.
         self.setMenuBar(menu_bar)
 
     def apply_styles(self):
@@ -688,10 +611,6 @@ class TreasureMazeGUI(QMainWindow):
         self.setStyleSheet(base_style)
         self.grid_visualizer.set_theme(self.current_style)
         self.progress_bar.setStyleSheet(self.current_style["progress"])
-
-    def set_theme(self, style: dict):
-        self.current_style = style
-        self.apply_styles()
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -794,7 +713,8 @@ class TreasureMazeGUI(QMainWindow):
             
             sol = result.get("solution", [])
             
-            # Enhanced console output for pathfinding results
+            # Console output for pathfinding results
+            self.console.clear()
             self.console.appendHtml(console_format("\nPathfinding Results:", "success"))
             self.console.appendHtml(console_format(
                 f"Algorithm: {self.selected_algorithm}", 
