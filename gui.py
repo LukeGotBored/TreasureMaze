@@ -45,13 +45,14 @@ BUTTON_PADDING = "8px 16px"
 FONT_FAMILY = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont).family()
 MONOSPACE_FONT = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont).family()
 
+# Styled console output colors using Catppuccin Mocha palette
 CONSOLE_STYLES = {
-    "info": "color: #89B4FA;",      
-    "success": "color: #A6E3A1;",   
-    "error": "color: #F38BA8;",     
-    "warning": "color: #FAB387;",   
-    "metric": "color: #CBA6F7;",    
-    "timestamp": "color: #9399B2;", 
+    "info": "color: #89B4FA;",      # Blue
+    "success": "color: #A6E3A1;",    # Green
+    "error": "color: #F38BA8;",      # Red
+    "warning": "color: #FAB387;",    # Peach
+    "metric": "color: #CBA6F7;",     # Mauve
+    "timestamp": "color: #9399B2;",  # Overlay0
 }
 
 logger = logging.getLogger("TreasureMazeGUI")
@@ -208,7 +209,7 @@ LIGHT_MODE = {
 
 # region Worker and Processing Class Definitions
 def format_time(seconds: float) -> str:
-    """Format time duration in a human-readable way"""
+    """Format time duration in a human-readable way with appropriate units"""
     if seconds < 0.001:
         return f"{seconds*1000000:.0f}µs"
     elif seconds < 1:
@@ -217,20 +218,22 @@ def format_time(seconds: float) -> str:
         return f"{seconds:.2f}s"
 
 def console_format(text: str, style: str = None, include_timestamp: bool = True) -> str:
-    """Format text with HTML styling for console output"""
+    """Format console text with HTML styling and optional timestamp"""
     timestamp = f'<span style="{CONSOLE_STYLES["timestamp"]}">[{datetime.now().strftime("%H:%M:%S")}]</span> ' if include_timestamp else ""
     if style:
         return f'{timestamp}<span style="{CONSOLE_STYLES[style]}">{text}</span>'
     return f'{timestamp}{text}'
 
 class WorkerSignals(QObject):
-    progress = pyqtSignal(int)
-    result = pyqtSignal(list, int, int, dict)  # Added timing_info parameter
+    """Signal definitions for worker thread communication"""
+    progress = pyqtSignal(int)  # Progress percentage (0-100)
+    result = pyqtSignal(list, int, int, dict)  # Predictions, rows, cols, timing info
     error = pyqtSignal(str)
     finished = pyqtSignal()
 
 
 class ImageProcessingWorker(QRunnable):
+    """Worker thread for processing maze images without blocking the GUI"""
     def __init__(self, image_path: str):
         super().__init__()
         self.image_path = image_path
@@ -238,6 +241,7 @@ class ImageProcessingWorker(QRunnable):
         self._is_running = True
 
     def run(self):
+        """Execute image processing pipeline with timing measurements"""
         try:
             start_time = time.perf_counter()
             self.signals.progress.emit(10)
@@ -304,6 +308,7 @@ class ImageProcessingWorker(QRunnable):
 
 # region Grid Visualizer Class
 class GridVisualizer(QGraphicsView):
+    """Interactive grid visualization widget with solution path overlay support"""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.scene = QGraphicsScene(self)
@@ -312,7 +317,7 @@ class GridVisualizer(QGraphicsView):
         self.setRenderHints(QtGui.QPainter.RenderHint.Antialiasing)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
         self.placeholder_text = None
-        self.solution_items = []  # Track solution overlay items
+        self.solution_items = []  # Graphics items for solution path visualization
         self._init_style()  # Renamed from apply_style() for clarity
         self.show_no_grid_message()
 
@@ -409,7 +414,7 @@ class GridVisualizer(QGraphicsView):
         self.solution_items.clear()
 
     def draw_solution_path(self, positions: List[Tuple[int, int]], current_step: int):
-        """Draw the solution path up to the current step"""
+        """Draw the solution path up to the current step using line segments"""
         self.clear_solution()
         if not positions:
             return
@@ -432,6 +437,7 @@ class GridVisualizer(QGraphicsView):
 
 # region Main GUI Class
 class TreasureMazeGUI(QMainWindow):
+    """Main application window implementing the maze analysis interface"""
     def __init__(self):
         super().__init__()
         self.current_style = DARK_MODE
@@ -441,7 +447,7 @@ class TreasureMazeGUI(QMainWindow):
         self.setAcceptDrops(True)
 
     def setup_state(self):
-        """Initialize all state variables"""
+        """Initialize application state variables"""
         self.image_path = ""
         self.thread_pool = QThreadPool()
         self.active_worker: Optional[ImageProcessingWorker] = None
@@ -449,8 +455,8 @@ class TreasureMazeGUI(QMainWindow):
         self.latest_predictions = []
         self.latest_rows = 0
         self.latest_cols = 0
-        self.solution_positions = []   # List of (col, row) on grid for the solution path
-        self.current_step_idx = 0      # Index into solution_positions for step-by-step display
+        self.solution_positions = []   # List of (col, row) coordinates for solution path
+        self.current_step_idx = 0      # Current position in solution animation
         self.solution_overlay_items = []  # Overlay graphical items for the displayed solution
         self.btn_prev = None  # Initialize btn_prev
         self.btn_next = None  # Initialize btn_next
@@ -629,7 +635,7 @@ class TreasureMazeGUI(QMainWindow):
             self.update_solution_display()
 
     def _update_navigation_buttons(self):
-        """Update navigation button states based on current position"""
+        """Update navigation button states based on current solution position"""
         has_solution = bool(self.solution_positions)
         self.btn_prev.setEnabled(has_solution and self.current_step_idx > 0)
         self.btn_next.setEnabled(has_solution and 
@@ -738,6 +744,7 @@ class TreasureMazeGUI(QMainWindow):
         self.thread_pool.start(self.active_worker)
 
     def handle_results(self, predictions: list, rows: int, cols: int, timing_info: dict):
+        """Process and display image analysis results with timing metrics"""
         self.latest_predictions = predictions
         self.latest_rows = rows
         self.latest_cols = cols
@@ -764,6 +771,7 @@ class TreasureMazeGUI(QMainWindow):
         self.btn_play.setEnabled(bool(predictions) and bool(self.selected_algorithm))
 
     def run_pathfinding(self):
+        """Execute selected pathfinding algorithm and visualize results"""
         if not self.latest_predictions:
             self.show_error("No digit predictions available. Please analyze an image first.")
             return
@@ -827,12 +835,15 @@ class TreasureMazeGUI(QMainWindow):
         self._update_navigation_buttons()
 
     def compute_solution_positions(self, moves: list) -> list:
-        # Find the starting cell by looking for the first "S" in predictions.
+        """Convert solution moves (UP, DOWN, etc.) to grid coordinates"""
+        # Find starting position marked with 'S'
         start = (0, 0)
         for idx, (label, _) in enumerate(self.latest_predictions):
             if label == "S":
                 start = (idx % self.latest_cols, idx // self.latest_cols)
                 break
+
+        # Transform moves into grid coordinates
         positions = [start]
         curr = start
         delta = {"UP": (0, -1), "DOWN": (0, 1), "LEFT": (-1, 0), "RIGHT": (1, 0)}
@@ -867,6 +878,7 @@ class TreasureMazeGUI(QMainWindow):
         self.active_worker = None
 
     def show_error(self, message: str):
+        """Display error message in console and status bar"""
         self.console.appendHtml(console_format(message, "error"))
         self.status_bar.showMessage(message, 5000)
         self.status_label.setText("Error")
