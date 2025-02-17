@@ -391,17 +391,28 @@ class TreasureMaze(Problem):
     def approx_distance(self, node):
         maze = node.state.maze
         agent_position = node.state.position
-        distances = []
+        distances = [(agent_position, 0)]
 
-        for y, row in enumerate(maze):
-            for x, cell in enumerate(row):
-                if cell == "T":
-                    distances.append(manhattan_distance(agent_position, (x, y)))
+        for r, row in enumerate(maze):
+            for c, column in enumerate(row):
+                if row[c] == "T":
+                    treasure_position = (c, r)
+                    treasure_distance = manhattan_distance(agent_position, treasure_position)
+                    distances.append((treasure_position, treasure_distance))
+                    
+        if len(distances) > 1: 
+            distances.sort(key = lambda x: x[0])
+            approx_dist = 0
 
-        distances.sort()
-        treasures_left = self.n_treasures - len(node.state.treasures)
-        return sum(distances[:treasures_left]) if treasures_left > 0 else 0
+            treasures_left = self.n_treasures - len(node.state.treasures)
 
+            for i in range(1, treasures_left + 1):
+                approx_dist += manhattan_distance(distances[i][0], distances[i - 1][0])
+            return approx_dist
+        else:
+            return 0
+        
+        
 def pathfind(algorithm: str, rows: int, columns: int, predicted_digits: list, treasures: int = None):
     if rows <= 0 or columns <= 0:
         logger.error("Invalid grid dimensions")
