@@ -15,7 +15,7 @@ from logger import setup_logger
 
 logger = logging.getLogger("TreasureMaze")
 
-# Processing constants
+# region Processing constants
 MAX_SIZE = 1024
 MIN_BLUR_THRESHOLD = 100
 ADAPTIVE_THRESH_BLOCK_SIZE = 57
@@ -23,7 +23,7 @@ ADAPTIVE_THRESH_C = 7
 EMN_DIGIT_SIZE = 28
 EMN_BORDER_SIZE = 10
 
-# Utility Functions
+# region Utility methods
 def display_image(image: np.ndarray, title: str = "Image") -> None:
     cv2.imshow(title, image)
     if cv2.waitKey(0) & 0xFF == ord("q"):
@@ -36,7 +36,19 @@ def check_blurriness(image: np.ndarray) -> float:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) > 2 else image
     return cv2.Laplacian(gray, cv2.CV_64F).var()
 
-# Image Preprocessing Functions
+def get_img(file_path: str) -> np.ndarray:
+    if not file_path or not os.path.exists(file_path):
+        logger.error(f"Invalid file path: {file_path}")
+        return None
+    image = cv2.imread(file_path)
+    if image is None:
+        logger.error(f"Failed to load image: {file_path}")
+        return None
+    return image
+
+
+# region Image Loading & Preprocessing
+# Load the image from disk and apply preprocessing steps to standardize it for digit extraction
 def preprocess(image: np.ndarray) -> np.ndarray:
     if image is None:
         logger.error("Invalid image")
@@ -46,10 +58,14 @@ def preprocess(image: np.ndarray) -> np.ndarray:
         logger.debug(f"Image dimensions: {w}x{h}")
 
         if max(h, w) > MAX_SIZE or min(h, w) < MAX_SIZE:
-            ratio = MAX_SIZE / float(max(h, w))
-            new_size = (int(w * ratio), int(h * ratio))
-            image = cv2.resize(image, new_size, interpolation=cv2.INTER_AREA)
-            logger.debug(f"Resized image to {new_size[0]}x{new_size[1]}")
+            try:
+                ratio = MAX_SIZE / float(max(h, w))
+                new_size = (int(w * ratio), int(h * ratio))
+                image = cv2.resize(image, new_size, interpolation=cv2.INTER_AREA)
+                logger.debug(f"Resized image to {new_size[0]}x{new_size[1]}")
+            except Exception as e:
+                logger.error(f"Could not extract the grid: {e}")
+                return None
 
         fm = check_blurriness(image)
         logger.debug(f"Focus measure: {fm:.2f}")
@@ -59,7 +75,7 @@ def preprocess(image: np.ndarray) -> np.ndarray:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         gray = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, kernel)
-        gray = cv2.GaussianBlur(gray, (5, 5), 0)
+        gray = cv2.GaussianBlur(gray, (9, 9), 0)
         return cv2.adaptiveThreshold(
             gray,
             255,
@@ -69,10 +85,11 @@ def preprocess(image: np.ndarray) -> np.ndarray:
             ADAPTIVE_THRESH_C,
         )
     except Exception as e:
-        logger.error(f"Preprocessing error: {e}")
+        logger.error(f"Unable to preprocess image: {e}")
         return None
 
 def warp_image(thresh_image: np.ndarray) -> np.ndarray:
+    # ? Source: https://www.pyimagesearch.com/2014/08/25/4-point-opencv-getperspective-transform-example/
     try:
         contours, _ = cv2.findContours(thresh_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
@@ -108,20 +125,17 @@ def warp_image(thresh_image: np.ndarray) -> np.ndarray:
         M = cv2.getPerspectiveTransform(rect, dst_pts)
         return cv2.warpPerspective(thresh_image, M, (w, h))
     except Exception as e:
-        logger.error(f"Warp error: {e}")
+        logger.error(f"Unable to warp image: {e}")
         return None
-
-def get_img(file_path: str) -> np.ndarray:
-    if not file_path or not os.path.exists(file_path):
-        logger.error(f"Invalid file path: {file_path}")
-        return None
-    image = cv2.imread(file_path)
-    if image is None:
-        logger.error(f"Failed to load image: {file_path}")
-        return None
-    return image
 
 def standardize(img) -> np.ndarray:
+    """
+    Standardize the input image by resizing, blurring, and applying adaptive thresholding.
+    """
+    if img is None:
+        logger.error("Invalid image")
+        return None
+    
     processed = preprocess(img)
     if processed is None:
         logger.error("Image processing failed")
@@ -132,11 +146,37 @@ def standardize(img) -> np.ndarray:
         return processed
     return warped
 
-def get_next_cnt(h, i):
-    return int(h[0][i][0])
 
+# region Digit Extraction
+# Extract digits from the standardized image and prepare them for prediction.
+
+# New helper to safely get bounding rectangle
+def safe_boundingRect(contour):
+    try:
+        rect = cv2.boundingRect(contour)
+        # Guard against division by zero if height is 0.
+        if rect[3] == 0:
+            raise ValueError("boundingRect height is zero")
+        return rect
+    except Exception as e:
+        logger.error(f"Error in boundingRect: {e}")
+        return (0, 0, 0, 0)
+
+# Update get_next_cnt with per-case error handling
+def get_next_cnt(h, i):
+    try:
+        return int(h[0][i][0])
+    except Exception as e:
+        logger.error(f"Error in get_next_cnt for index {i}: {e}")
+        return -1
+
+# Update get_first_child with per-case error handling
 def get_first_child(h, i):
-    return int(h[0][i][2])
+    try:
+        return int(h[0][i][2])
+    except Exception as e:
+        logger.error(f"Error in get_first_child for index {i}: {e}")
+        return -1
 
 def get_largest_child(h, contours, i=-1):
     local_scan = get_first_child(h, i) if i != -1 else 0
@@ -156,76 +196,106 @@ def get_largest_child(h, contours, i=-1):
     return largest_cnt, largest_cnt_idx
 
 def estimate_grid_size(grid_rect, cells, n_cells):
+    # Guard against division by zero if no cells were extracted
+    if len(cells) == 0:
+        return (0, 0)
     avg_w = sum(c["rect"][2] for c in cells) / len(cells)
     avg_h = sum(c["rect"][3] for c in cells) / len(cells)
+    # Guard against avg_h being zero
+    if avg_h == 0:
+        return (0, 0)
     rows = math.floor(grid_rect[3] / avg_h)
-    columns = math.floor(n_cells / rows)
+    columns = math.floor(n_cells / rows) if rows > 0 else 0
     return (rows, columns)
 
 def extract_digits(img):
     logger = logging.getLogger("TreasureMaze")
-    img_contours, hierarchy = cv2.findContours(img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    grid, grid_idx = get_largest_child(hierarchy, img_contours, -1)
-    grid_rect = cv2.boundingRect(grid)
+    try:
+        img_contours, hierarchy = cv2.findContours(img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        if hierarchy is None or len(hierarchy) == 0:
+            raise ValueError("Hierarchy not found")
+        grid, grid_idx = get_largest_child(hierarchy, img_contours, -1)
+        if grid is None or ((isinstance(grid, np.ndarray) and grid.size == 0)) or grid_idx < 0:
+            raise ValueError("Grid extraction failed")
+        grid_rect = safe_boundingRect(grid)
 
-    if logger.isEnabledFor(logging.DEBUG):
-        newImage = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-        cv2.drawContours(newImage, img_contours, grid_idx, (0, 255, 0), 3)
-        display_image(newImage)
+        if logger.isEnabledFor(logging.DEBUG):
+            newImage = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+            cv2.drawContours(newImage, img_contours, grid_idx, (0, 255, 0), 3)
+            display_image(newImage)
 
-    cells = []
-    cell_scan = get_first_child(hierarchy, grid_idx)
-    while cell_scan != -1:
-        if cv2.contourArea(img_contours[cell_scan]) > 1000:
-            cell_rect = cv2.boundingRect(img_contours[cell_scan])
-            cell_center = (math.floor(cell_rect[0] + cell_rect[2] / 2), math.floor(cell_rect[1] + cell_rect[3] / 2))
-            cells.append({"idx": cell_scan, "contour": img_contours[cell_scan], "rect": cell_rect, "center": cell_center})
-        cell_scan = get_next_cnt(hierarchy, cell_scan)
+        cells = []
+        cell_scan = get_first_child(hierarchy, grid_idx)
+        while cell_scan != -1:
+            if cv2.contourArea(img_contours[cell_scan]) > 1000:
+                try:
+                    cell_rect = safe_boundingRect(img_contours[cell_scan])
+                    cell_center = (math.floor(cell_rect[0] + cell_rect[2] / 2), math.floor(cell_rect[1] + cell_rect[3] / 2))
+                    cells.append({"idx": cell_scan, "contour": img_contours[cell_scan], "rect": cell_rect, "center": cell_center})
+                except Exception as e:
+                    logger.error(f"Skipping cell at index {cell_scan}: {e}")
+            cell_scan = get_next_cnt(hierarchy, cell_scan)
 
-    n_cells = len(cells)
-    grid_rows, grid_columns = estimate_grid_size(grid_rect, cells, n_cells)
-    logger.info(f"Estimated size: {grid_rows}x{grid_columns} | Found {n_cells} cells ({'match' if grid_rows * grid_columns == n_cells else 'mismatch'})")
+        n_cells = len(cells)
+        grid_rows, grid_columns = estimate_grid_size(grid_rect, cells, n_cells)
+        logger.info(f"Estimated size: {grid_rows}x{grid_columns} | Found {n_cells} cells")
+        if grid_rows == 0 or grid_columns == 0:
+            raise ValueError("Invalid grid dimensions extracted")
 
-    digits = [0 for _ in range(n_cells)]
-    for cell in cells:
-        digit_cnt, digit_idx = get_largest_child(hierarchy, img_contours, cell["idx"])
-        digit_row = math.floor((cell["center"][1] - grid_rect[1]) / grid_rect[3] * grid_rows)
-        digit_column = math.floor((cell["center"][0] - grid_rect[0]) / grid_rect[2] * grid_columns)
-        digits[digit_row * grid_columns + digit_column] = {"idx": digit_idx, "contour": digit_cnt, "rect": cv2.boundingRect(digit_cnt)}
-
-    logger.info(f"Found digits: {len(digits)}")
-    newImage = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-
-    def pad_to_square(image: np.ndarray, target_size: int) -> np.ndarray:
-        h, w = image.shape[:2]
-        if w != h:
-            border = abs(w - h) // 2
-            if w > h:
-                image = cv2.copyMakeBorder(image, border, border, 0, 0, cv2.BORDER_CONSTANT, value=[0, 0, 0])
+        digits = [0 for _ in range(n_cells)]
+        for cell in cells:
+            digit_cnt, digit_idx = get_largest_child(hierarchy, img_contours, cell["idx"])
+            try:
+                digit_rect = safe_boundingRect(digit_cnt)
+            except Exception as e:
+                logger.error(f"Error retrieving digit rectangle: {e}")
+                continue
+            digit_row = math.floor((cell["center"][1] - grid_rect[1]) / grid_rect[3] * grid_rows)
+            digit_column = math.floor((cell["center"][0] - grid_rect[0]) / grid_rect[2] * grid_columns)
+            idx = digit_row * grid_columns + digit_column
+            if idx < 0 or idx >= len(digits):
+                logger.error(f"Computed cell index {idx} out of range for grid size {grid_rows}x{grid_columns}")
             else:
-                image = cv2.copyMakeBorder(image, 0, 0, border, border, cv2.BORDER_CONSTANT, value=[0, 0, 0])
-        return cv2.resize(image, (target_size, target_size), interpolation=cv2.INTER_AREA)
+                digits[idx] = {"idx": digit_idx, "contour": digit_cnt, "rect": digit_rect}
 
-    digits_img = []
-    for digit in digits:
-        x, y, w, h = digit["rect"]
-        digit_img = newImage[y:y + h, x:x + w]
-        digit_img = pad_to_square(digit_img, EMN_DIGIT_SIZE)
-        digit_img = cv2.copyMakeBorder(digit_img, EMN_BORDER_SIZE, EMN_BORDER_SIZE, EMN_BORDER_SIZE, EMN_BORDER_SIZE, cv2.BORDER_CONSTANT, value=[0, 0, 0])
-        digit_img = cv2.flip(digit_img, 1)
-        if np.mean(digit_img) > 127:
-            digit_img = cv2.bitwise_not(digit_img)
-        digit_img = cv2.rotate(digit_img, cv2.ROTATE_90_COUNTERCLOCKWISE)
-        digits_img.append(digit_img)
+        if any(isinstance(item, int) for item in digits):
+            raise ValueError("Grid extraction failed: some cells could not be processed.")
 
-    if logger.isEnabledFor(logging.DEBUG):
-        for i, digit_img in enumerate(digits_img):
-            display_image(digit_img, f"Digit {i+1}")
+        logger.info(f"Found digits: {len(digits)}")
+        newImage = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        def pad_to_square(image: np.ndarray, target_size: int) -> np.ndarray:
+            h, w = image.shape[:2]
+            if w != h:
+                border = abs(w - h) // 2
+                if w > h:
+                    image = cv2.copyMakeBorder(image, border, border, 0, 0, cv2.BORDER_CONSTANT, value=[0, 0, 0])
+                else:
+                    image = cv2.copyMakeBorder(image, 0, 0, border, border, cv2.BORDER_CONSTANT, value=[0, 0, 0])
+            return cv2.resize(image, (target_size, target_size), interpolation=cv2.INTER_AREA)
 
-    return {"grid": {"rows": grid_rows, "columns": grid_columns}, "digits": digits_img}
+        digits_img = []
+        for digit in digits:
+            x, y, w, h = digit["rect"]
+            digit_img = newImage[y:y + h, x:x + w]
+            digit_img = pad_to_square(digit_img, EMN_DIGIT_SIZE)
+            digit_img = cv2.copyMakeBorder(digit_img, EMN_BORDER_SIZE, EMN_BORDER_SIZE, EMN_BORDER_SIZE, EMN_BORDER_SIZE, cv2.BORDER_CONSTANT, value=[0, 0, 0])
+            digit_img = cv2.flip(digit_img, 1)
+            if np.mean(digit_img) > 127:
+                digit_img = cv2.bitwise_not(digit_img)
+            digit_img = cv2.rotate(digit_img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            digits_img.append(digit_img)
+
+        if not digits_img:
+            raise ValueError("No grid detected")
+        return {"grid": {"rows": grid_rows, "columns": grid_columns}, "digits": digits_img}
+    except Exception as e:
+        logger.error(f"Could not extract the grid: {e}")
+        raise
+
+# region Digit Prediction
+# Predict the values of the extracted digits using the trained model
 
 label_map = {0: "1", 1: "2", 2: "3", 3: "4", 4: "S", 5: "T", 6: "X"}
-
 def predict_digit(digits_img: list, model_path: str) -> list:
     logger = logging.getLogger("TreasureMaze")
     try:
@@ -266,6 +336,9 @@ def predict_digit(digits_img: list, model_path: str) -> list:
 
     return predictions
 
+
+# region Pathfinding
+# Define the problem and pathfinding methods for the treasure maze
 class MazeState:
     def __init__(self, maze, position, treasures):
         self.maze = maze
@@ -401,7 +474,7 @@ class TreasureMaze(Problem):
                     distances.append((treasure_position, treasure_distance))
                     
         if len(distances) > 1: 
-            distances.sort(key = lambda x: x[0])
+            distances.sort(key = lambda x: x[1])
             approx_dist = 0
 
             treasures_left = self.n_treasures - len(node.state.treasures)
@@ -411,7 +484,6 @@ class TreasureMaze(Problem):
             return approx_dist
         else:
             return 0
-        
         
 def pathfind(algorithm: str, rows: int, columns: int, predicted_digits: list, treasures: int = None):
     if rows <= 0 or columns <= 0:
@@ -453,7 +525,7 @@ def pathfind(algorithm: str, rows: int, columns: int, predicted_digits: list, tr
         "BFS": breadth_first_graph_search,
         "DFS": depth_first_graph_search,
         "UCS": uniform_cost_search,
-        "Best First Graph": lambda p: best_first_graph_search(p, p.approx_distance),
+        "Best First": lambda p: best_first_graph_search(p, p.approx_distance),
         "A*": lambda p: astar_search(p, p.approx_distance)
     }
 
@@ -488,7 +560,10 @@ def pathfind(algorithm: str, rows: int, columns: int, predicted_digits: list, tr
         "length": solution_node.depth if solution_node else None
     }
 
+# region Main
 def main():
+    
+    # region Argument Parsing
     parser = argparse.ArgumentParser(description="Treasure Maze Image Processor")
     parser.add_argument("-d", "--debug", action="store_true", help="Show debug info")
     parser.add_argument("-f", "--file", required=True, help="Path to image file")
@@ -497,10 +572,9 @@ def main():
     parser.add_argument(
         "-a", "--algorithm", 
         required=True, 
-        choices=["BFS", "DFS", "UCS", "Best First Graph", "A*"], 
+        choices=["BFS", "DFS", "UCS", "Best First", "A*"], 
         help="Choose the type of algorithm for pathfinding"
     )
-    
     args = parser.parse_args()
     logger = setup_logger(args.debug)
     if args.debug:
@@ -508,24 +582,34 @@ def main():
         logger.debug("Debug mode enabled!")
     else:
         logger.setLevel(logging.INFO)
-    
-    logger.info("Treasure Maze | Initializing...")
 
+    logger.info("Treasure Maze | Initializing...")
+    
+    # region Image Loading & Preprocessing
     img = get_img(args.file)
     img_standard = standardize(img)
-
     if img_standard is None:
         logger.error("Failed to standardize image")
         return 1
 
     logger.info("Image standardized, attempting to extract digits...")
     extracted = extract_digits(img_standard)
-    predicted_digits = predict_digit(extracted["digits"], args.model)
     grid_info = extracted.get("grid", {})
     rows = grid_info.get("rows", 0)
     columns = grid_info.get("columns", 0)
+
+    # Gracefully exit if grid extraction failed
+    if rows == 0 or columns == 0 or not extracted.get("digits"):
+        logger.error("Grid extraction did not complete successfully; aborting the process.")
+        return 1
+
     logger.info(f"Grid size: {rows}x{columns}")
     
+    # region Digit Extraction & Prediction
+    predicted_digits = predict_digit(extracted["digits"], args.model)
+    logger.info(f"Grid size: {rows}x{columns}")
+
+    # region Grid Processing & Output
     grid_output = ""
     for r in range(rows):
         row_predictions = []
@@ -534,7 +618,7 @@ def main():
             if idx < len(predicted_digits):
                 pred = predicted_digits[idx]
                 if not pred or pred[0] == "Unknown":
-                    cell_output = "1" # Fallback
+                    cell_output = "1"  # Fallback digit
                 else:
                     label_val, conf = pred[0], pred[1]
                     cell_output = f"{label_val} (c: {conf:.2f})"
@@ -545,14 +629,13 @@ def main():
     logger.info(f"Grid predictions:\n{grid_output}")
     if logger.isEnabledFor(logging.DEBUG):
         display_image(img_standard)
-
     logger.info(f"Predicted {len(predicted_digits)} digits ({len(predicted_digits) / (rows * columns) * 100:.2f}% of expected)")
-    
     logger.info(f"Pathfinding algorithm: {args.algorithm}")
+    
+    # region Pathfinding
     pathfinding = pathfind(args.algorithm, rows, columns, predicted_digits, args.treasures)
 
-    
-    # get the position of the start point and draw a bounding box around it (S is the start point)
+    # region Extract Start Position
     start_pos = None
     for r in range(rows):
         for c in range(columns):
@@ -564,10 +647,6 @@ def main():
                     break
         if start_pos:
             break
-    
-    
-    
-    
 
     return 0
 
