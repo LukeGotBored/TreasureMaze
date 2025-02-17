@@ -283,30 +283,40 @@ class MazeState:
 
 class TreasureMaze(Problem):
     def __init__(self, maze, n_treasures=None):
+        # Validate maze dimensions and consistency
+        if not maze or not all(maze) or any(len(row) != len(maze[0]) for row in maze):
+            logger.error("Maze is empty or has inconsistent row lengths.")
+            raise ValueError("Invalid maze structure.")
         self.rows = len(maze)
         self.columns = len(maze[0])
-        initial_maze = tuple(tuple(row) for row in maze)
 
-        num_s = 0
+        # Convert to immutable type
+        initial_maze = tuple(tuple(str(cell) for cell in row) for row in maze)
+
+        # Find the 'S' start position
+        start_found = False
+        initial_position = (0, 0)
         for r, row in enumerate(maze):
             if "S" in row:
                 initial_position = (row.index("S"), r)
-                num_s += 1
+                start_found = True
                 break
-
-        if num_s == 0:
-            logger.error(f"Start position not set!")
-            raise ValueError
+        if not start_found:
+            logger.error("Start position 'S' not found!")
+            raise ValueError("No start in maze.")
 
         self.initial = MazeState(initial_maze, initial_position, ())
-        treasures = self.count_treasures(maze)
 
+        # Count total treasures and validate requested treasure count
+        treasures = self.count_treasures(maze)
         if n_treasures:
-            if n_treasures <= treasures:
-                self.n_treasures = n_treasures
-            else:
-                logger.error(f"Not enough treasures in maze! Insert a lower number.")
-                raise ValueError
+            if n_treasures <= 0:
+                logger.error("Requested treasure count must be positive.")
+                raise ValueError("Invalid treasure count.")
+            if n_treasures > treasures:
+                logger.error("Not enough treasures in maze for requested count!")
+                raise ValueError("Too few treasures in maze.")
+            self.n_treasures = n_treasures
         else:
             self.n_treasures = treasures
 
@@ -314,35 +324,33 @@ class TreasureMaze(Problem):
         return sum(row.count("T") for row in maze)
 
     def actions(self, state):
-        possible_actions = ['UP', 'DOWN', 'LEFT', 'RIGHT']
+        possible_actions = ["UP", "DOWN", "LEFT", "RIGHT"]
         agent_x, agent_y = state.position
 
-        if agent_x == 0:
-            possible_actions.remove('LEFT')
-        if agent_y == 0:
-            possible_actions.remove('UP')
-        if agent_x == self.columns - 1:
-            possible_actions.remove('RIGHT')
-        if agent_y == self.rows - 1:
-            possible_actions.remove('DOWN')
-
+        if agent_x <= 0:
+            possible_actions.remove("LEFT")
+        if agent_y <= 0:
+            possible_actions.remove("UP")
+        if agent_x >= self.columns - 1:
+            possible_actions.remove("RIGHT")
+        if agent_y >= self.rows - 1:
+            possible_actions.remove("DOWN")
         return possible_actions
 
     def result(self, state, action):
-        new_maze = list(list(row) for row in state.maze)
+        new_maze = [list(row) for row in state.maze]
         new_position = list(state.position)
         new_treasures = list(state.treasures)
 
-        delta = {'UP': (0, -1), 'DOWN': (0, 1), 'LEFT': (-1, 0), 'RIGHT': (1, 0)}
-
+        delta = {"UP": (0, -1), "DOWN": (0, 1), "LEFT": (-1, 0), "RIGHT": (1, 0)}
         new_position[0] += delta[action][0]
         new_position[1] += delta[action][1]
 
-        current_cell = new_maze[new_position[1]][new_position[0]]
+        current_cell = str(new_maze[new_position[1]][new_position[0]])
         if current_cell == "X":
-            new_maze[new_position[1]][new_position[0]] = 1
+            new_maze[new_position[1]][new_position[0]] = "1"
         elif current_cell == "T":
-            new_maze[new_position[1]][new_position[0]] = 1
+            new_maze[new_position[1]][new_position[0]] = "1"
             new_treasures.append(tuple(new_position))
 
         return MazeState(
@@ -356,44 +364,43 @@ class TreasureMaze(Problem):
 
     def path_cost(self, c, state1, action, state2):
         new_x, new_y = state2.position
-        new_cell = state1.maze[new_y][new_x]
+        new_cell = str(state1.maze[new_y][new_x])
 
         if new_cell == "X":
             cell_cost = 5
-        elif new_cell == "T" or new_cell == "S":
+        elif new_cell in ["T", "S"]:
             cell_cost = 1
         else:
-            cell_cost = int(new_cell)
-
+            try:
+                cell_cost = int(new_cell)
+            except ValueError:
+                cell_cost = 1  # Fallback if cell is non-numeric
         return c + cell_cost
 
     def mean_distance(self, node):
         maze = node.state.maze
         agent_position = node.state.position
-        distances = [euclidean_distance(agent_position, (c, r)) for r, row in enumerate(maze) for c, column in enumerate(row) if row[c] == "T"]
+        distances = [
+            euclidean_distance(agent_position, (x, y))
+            for y, row in enumerate(maze)
+            for x, cell in enumerate(row)
+            if cell == "T"
+        ]
         return sum(distances) / len(distances) if distances else 0
 
     def approx_distance(self, node):
         maze = node.state.maze
         agent_position = node.state.position
-        distances = [(agent_position, 0)]
+        distances = []
 
-        for r, row in enumerate(maze):
-            for c, column in enumerate(row):
-                if row[c] == "T":
-                    treasure_position = (c, r)
-                    treasure_distance = manhattan_distance(agent_position, treasure_position)
-                    distances.append((treasure_position, treasure_distance))
+        for y, row in enumerate(maze):
+            for x, cell in enumerate(row):
+                if cell == "T":
+                    distances.append(manhattan_distance(agent_position, (x, y)))
 
-        if len(distances) > 1:
-            distances.sort(key=lambda point: point[1])
-            approx_dist = 0
-            treasures_left = self.n_treasures - len(node.state.treasures)
-            for i in range(1, treasures_left + 1):
-                approx_dist += manhattan_distance(distances[i][0], distances[i - 1][0])
-            return approx_dist
-        else:
-            return 0
+        distances.sort()
+        treasures_left = self.n_treasures - len(node.state.treasures)
+        return sum(distances[:treasures_left]) if treasures_left > 0 else 0
 
 def pathfind(algorithm: str, rows: int, columns: int, predicted_digits: list, treasures: int = None):
     if rows <= 0 or columns <= 0:
