@@ -1,46 +1,55 @@
 # TreasureMaze
 
-TreasureMaze is a Python-based project for maze detection and pathfinding optimization.
+TreasureMaze is a Python project for maze extraction using computer vision with OpenCV and pathfinding via advanced search algorithms. It also includes a GUI for visualizing maze analysis and a model training pipeline for digit recognition based on EMNIST.
 
 ## About
-This project combines computer vision (using OpenCV) for maze extraction and segmentation (through Pytorch and EMNIST) with advanced pathfinding algorithms to generate optimal solutions.
 
-## Core Features
-
-### Maze Structure
-- **Start (S)**: The agent's starting position.
-- **Treasure (T)**: Points representing treasures.
-- **Wall (X)**: Breakable obstacles with an associated cost (5).
-- **Paths (1/4)**: Traversable cells with their respective costs.
+- **Maze Extraction & Segmentation:** Uses OpenCV to standardize and extract grids from maze images.  
+- **Pathfinding Algorithms:** Implements BFS, DFS, UCS, Best First, and A* to solve the maze.
+- **Digit Recognition:** A trained CNN (or MLP) model predicts maze cell values from image segments.
+- **GUI Visualization:** Offers an interactive interface to load images, view analysis, and step through solution paths.
+- **Model Training:** Includes a module to train and evaluate models on filtered EMNIST datasets.
 
 ## Requirements
-- Python 3.x
-- OpenCV >= 4.0
-- NumPy
+
+- Python 3.x  
+- OpenCV ≥ 4.0  
+- NumPy  
+- TensorFlow & Keras  
+- Other requirements as listed in `requirements.txt`
 
 ## Installation
-1. Ensure [Python 3.x](https://www.python.org/downloads/) is installed.
-2. Clone the repository.
-3. Install dependencies:
+
+1. Clone the repository.
+2. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
 
 ## Usage
-Run the main script with optional command-line arguments:
-```bash
-python main.py [-d | --debug] [-s | --size SIZE] [--output-size OUTPUT_SIZE] [--output-padding OUTPUT_PADDING] [--img-resize IMG_RESIZE]
-```
-- `-d/--debug`: Enable debug mode.
-- `-s/--size`: Maximum size for the input image (default: 1024).
-- `--output-size`: Output digit size (default: 28).
-- `--output-padding`: Padding for the output (default: 10).
-- `--img-resize`: Override the default image resize value.
 
-After running, provide the maze image path when prompted. Monitor the console for processing details via compact log messages.
+### Running the Maze Analyzer
+
+To process a maze image and execute pathfinding, run:
+```bash
+python main.py -f path/to/image.jpg -m path/to/model.keras -a "A*"
+```
+Additional flags:
+- `-d/--debug`: Enable debug output.
+- `-t/--treasures`: Specify the number of treasures to find.
+
+### Model Training
+
+To train the digit recognition models (MLP/CNN) on the EMNIST dataset:
+```bash
+python model/train.py [--debug] [--use-batchnorm] [--disable-early-stopping]
+```
+Follow the prompts to optionally save the models.
 
 ## Contributing
-Contributions are not currently accepted, but the repository is public and can be used for educational purposes.
+
+This repository is mainly for educational purposes and research. Contributions are welcome but not actively accepted at this time.
 
 ## License
+
 This project is licensed under the MIT License – see the [LICENSE](LICENSE) file for details.
