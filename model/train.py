@@ -5,6 +5,7 @@ import argparse
 import logging
 import random
 import numpy as np
+import tensorflow as tf
 
 from tqdm import tqdm
 from colorama import Fore, init
@@ -66,11 +67,20 @@ def preprocess_data(dataset):
     return images, mapped_labels
 
 
+# Add helper to cache the predict function
+def get_predict_fn(model):
+    if not hasattr(model, '_cached_predict_fn'):
+        model._cached_predict_fn = tf.function(model.predict, reduce_retracing=True)
+    return model._cached_predict_fn
+
+
 def test_random_sample(model, test_images, test_labels, model_name, logger_instance):
     idx = random.randint(0, test_images.shape[0] - 1)
     sample_image = test_images[idx : idx + 1]
     actual_label = int(test_labels[idx])
-    pred_probs = model.predict(sample_image)
+    # Use cached tf.function for prediction
+    predict_fn = get_predict_fn(model)
+    pred_probs = predict_fn(sample_image)
     pred_class = int(np.argmax(pred_probs, axis=1)[0])
     logger_instance.info(f"[{model_name}] Random sample prediction:")
     logger_instance.info(f"  Actual label (0-6): {actual_label} ({LABEL_MAP[actual_label]})")
@@ -270,7 +280,8 @@ def main():
 
     # Plot confusion matrix for the CNN predictions along with training curves.
     logger_instance.info("Calculating confusion matrix for the CNN model...")
-    predictions = np.argmax(cnn.predict(test_images), axis=1)
+    predict_fn = get_predict_fn(cnn)
+    predictions = np.argmax(predict_fn(test_images), axis=1)
     plot_confusion_matrix(test_labels, predictions, logger_instance)
     
     plt.figure(figsize=(12, 6))
