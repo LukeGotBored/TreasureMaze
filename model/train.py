@@ -32,6 +32,7 @@ from logger import setup_logger
 
 
 def load_csv(file_path, logger_instance):
+    # Read CSV and convert fields to floats; progress is tracked using tqdm.
     data = []
     try:
         with open(file_path, "r") as f:
@@ -57,6 +58,7 @@ def load_csv(file_path, logger_instance):
 
 
 def preprocess_data(dataset):
+    # Reshape image data and remap labels based on ALLOWED_LABELS.
     labels = dataset[:, 0]
     images = dataset[:, 1:].reshape(-1, 28, 28, 1) / 255.0
     remap = {val: i for i, val in enumerate(ALLOWED_LABELS)}
@@ -136,6 +138,7 @@ def build_cnn(input_shape, num_classes, use_batchnorm=False):
 
 
 def save_model(model, model_name):
+    # Create output directory and prompt user if model exists before saving.
     base_path = os.path.join(os.getcwd(), "model", "out")
     os.makedirs(base_path, exist_ok=True)
     save_file = os.path.join(base_path, f"{model_name}.keras")
@@ -158,6 +161,7 @@ def plot_confusion_matrix(true_labels, predictions, logger_instance):
 
 
 def main():
+    # Parse command-line arguments (e.g., enabling debug mode and early stopping parameters).
     parser = argparse.ArgumentParser(
         description="Train MLP and CNN on a filtered subset of EMNIST."
     )
@@ -189,6 +193,7 @@ def main():
         logger_instance.setLevel(logging.DEBUG)
         logger_instance.debug("Debug enabled!")
 
+    # Load datasets and filter out unwanted rows based on allowed labels.
     dataset_base = os.path.join(os.getcwd(), "model", "dataset")
     train_csv = os.path.join(dataset_base, "emnist-balanced-train.csv")
     test_csv = os.path.join(dataset_base, "emnist-balanced-test.csv")
@@ -197,6 +202,7 @@ def main():
     train_data = load_csv(train_csv, logger_instance)
     test_data = load_csv(test_csv, logger_instance)
 
+    # Preprocess CSV data into image tensors and label vectors.
     train_images, train_labels = preprocess_data(train_data)
     test_images, test_labels = preprocess_data(test_data)
     logger_instance.info(f"Training data shape: {train_images.shape}")
@@ -204,6 +210,7 @@ def main():
 
     num_classes = len(ALLOWED_LABELS)
     early_stopping = None
+    # Set up EarlyStopping callback if not disabled; restores best weights.
     if not args.disable_early_stopping:
         early_stopping = callbacks.EarlyStopping(
             monitor="val_loss",
@@ -213,7 +220,7 @@ def main():
             verbose=1,
         )
 
-    # Build and train MLP
+    # Build and train MLP model and output evaluation results.
     logger_instance.info("Building and training MLP...")
     mlp = build_mlp(train_images.shape[1:], num_classes, use_batchnorm=args.use_batchnorm)
     mlp_callbacks = [early_stopping] if early_stopping else []
@@ -229,7 +236,7 @@ def main():
     mlp_loss, mlp_acc = mlp.evaluate(test_images, test_labels, verbose=0)
     logger_instance.info(f"MLP Final Results -> Loss: {mlp_loss:.4f}, Accuracy: {mlp_acc:.4f}")
 
-    # Build and train CNN
+    # Build and train CNN model and output evaluation results.
     logger_instance.info("Building and training CNN...")
     cnn = build_cnn(train_images.shape[1:], num_classes, use_batchnorm=args.use_batchnorm)
     cnn_callbacks = [early_stopping] if early_stopping else []
@@ -245,12 +252,12 @@ def main():
     cnn_loss, cnn_acc = cnn.evaluate(test_images, test_labels, verbose=0)
     logger_instance.info(f"CNN Final Results -> Loss: {cnn_loss:.4f}, Accuracy: {cnn_acc:.4f}")
 
-    # Test random sample predictions
+    # Test model predictions on a random test sample.
     logger_instance.info("Testing a random sample from the test set:")
     test_random_sample(mlp, test_images, test_labels, "MLP", logger_instance)
     test_random_sample(cnn, test_images, test_labels, "CNN", logger_instance)
 
-    # Save models interactively
+    # Save models interactively based on user input.
     choice = input("Would you like to save the models? (y for both, m for MLP, c for CNN): ").strip().lower()
     model_actions = {"y": [("mlp", mlp), ("cnn", cnn)], "m": [("mlp", mlp)], "c": [("cnn", cnn)]}
     if choice in model_actions:
@@ -261,7 +268,7 @@ def main():
     else:
         print("Models not saved.")
 
-    # Plot confusion matrix for CNN
+    # Plot confusion matrix for the CNN predictions along with training curves.
     logger_instance.info("Calculating confusion matrix for the CNN model...")
     predictions = np.argmax(cnn.predict(test_images), axis=1)
     plot_confusion_matrix(test_labels, predictions, logger_instance)
