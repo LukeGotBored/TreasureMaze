@@ -234,23 +234,35 @@ def predict_digit(digits_img: list, model_path: str) -> list:
         logger.error(f"Failed to load model from {model_path}: {e}")
         raise
 
-    predictions = []
-    for idx, digit_img in enumerate(digits_img):
+    if not digits_img:
+        logger.warning("No digits to predict.")
+        return []
+
+    batch_data = []
+    for digit_img in digits_img:
         try:
             if len(digit_img.shape) == 3:
                 digit_img = cv2.cvtColor(digit_img, cv2.COLOR_BGR2GRAY)
             digit_img = cv2.resize(digit_img, (EMN_DIGIT_SIZE, EMN_DIGIT_SIZE), interpolation=cv2.INTER_AREA)
             digit_img = digit_img.astype("float32") / 255.0
             digit_img = digit_img.reshape(EMN_DIGIT_SIZE, EMN_DIGIT_SIZE, 1)
-            prediction = model.predict(np.expand_dims(digit_img, axis=0))
-            pred_class = int(np.argmax(prediction, axis=1)[0])
+            batch_data.append(digit_img)
+        except Exception as e:
+            logger.error(f"Preprocessing failed for a digit: {e}")
+            batch_data.append(np.zeros((EMN_DIGIT_SIZE, EMN_DIGIT_SIZE, 1), dtype="float32"))
+
+    predictions = []
+    try:
+        predictions_array = model.predict(np.array(batch_data))
+        for idx, prediction in enumerate(predictions_array):
+            pred_class = int(np.argmax(prediction))
             predicted_label = label_map.get(pred_class, "Unknown")
-            predicted_confidence = prediction[0][pred_class]
+            predicted_confidence = prediction[pred_class]
             predictions.append((predicted_label, predicted_confidence))
             logger.debug(f"Digit {idx}: Predicted {predicted_label} with confidence {predicted_confidence:.2f}")
-        except Exception as e:
-            logger.error(f"Prediction failed for digit at index {idx}: {e}")
-            predictions.append(None)
+    except Exception as e:
+        logger.error(f"Batch prediction failed: {e}")
+        return [None for _ in digits_img]
 
     return predictions
 
@@ -383,42 +395,66 @@ class TreasureMaze(Problem):
         else:
             return 0
 
-def pathfind(algorithm: str, rows: int, columns: int, predicted_digits: list) -> None:
+def pathfind(algorithm: str, rows: int, columns: int, predicted_digits: list, treasures: int = None):
+    if rows <= 0 or columns <= 0:
+        logger.error("Invalid grid dimensions")
+        return None
+    
+    if not predicted_digits:
+        logger.error("No digits predicted, cannot build maze.")
+        return None
+
+    # Rebuild the maze from predictions
     maze = []
     idx = 0
+
+    # If no treasure count is provided, assume from predicted 'T'
+    if treasures is None:
+        treasures = sum(1 for pred in predicted_digits if pred and pred[0] == "T")
+
+    if treasures is not None and treasures <= 0:
+        logger.warning(f"Invalid treasure count: {treasures}. Using default.")
+        treasures = None
+    
+    if len(predicted_digits) < rows * columns:
+        logger.warning("Fewer predicted digits than expected grid cells.")
+
     for r in range(rows):
         row_cells = []
         for c in range(columns):
             if idx < len(predicted_digits):
                 pred = predicted_digits[idx]
-                cell = pred[0] if pred and pred[0] != "Unknown" else "?"
+                cell = pred[0] if pred and pred[0] != "Unknown" else "1"
                 row_cells.append(cell)
-                idx += 1
             else:
-                row_cells.append("?")
+                row_cells.append("1")
+            idx += 1
         maze.append(row_cells)
 
     algo_map = {
-        "BFS": lambda problem: breadth_first_graph_search(problem),
-        "DFS": lambda problem: depth_first_graph_search(problem),
-        "UCS": lambda problem: uniform_cost_search(problem),
-        "Best First Graph": lambda problem: best_first_graph_search(problem, problem.approx_distance),
-        "A*": lambda problem: astar_search(problem, problem.approx_distance)
+        "BFS": breadth_first_graph_search,
+        "DFS": depth_first_graph_search,
+        "UCS": uniform_cost_search,
+        "Best First Graph": lambda p: best_first_graph_search(p, p.approx_distance),
+        "A*": lambda p: astar_search(p, p.approx_distance)
     }
+
     if algorithm not in algo_map:
         logger.info(f"Algorithm {algorithm} not recognized")
         return
 
     try:
-        problem = TreasureMaze(maze)
+        problem = TreasureMaze(maze, n_treasures=treasures)
+    except ValueError as ve:
+        logger.error(f"Problem creation failed: {ve}")
+        return None
     except Exception as e:
-        logger.info(f"Error creating TreasureMaze: {e}")
-        return
+        logger.error(f"Unexpected error during problem creation: {e}")
+        return None
 
-    search_algo = algo_map[algorithm]
-    logger.info(f"\nExecuting {algorithm} pathfinding algorithm...")
+    logger.info(f"Executing {algorithm}...")
     start_time = time()
-    solution_node = search_algo(problem)
+    solution_node = algo_map[algorithm](problem)
     end_time = time()
 
     if solution_node is None:
@@ -427,22 +463,26 @@ def pathfind(algorithm: str, rows: int, columns: int, predicted_digits: list) ->
         logger.info(f"Path: {solution_node.solution()}")
         logger.info(f"Path cost: {solution_node.path_cost}")
         logger.info(f"Path length: {solution_node.depth}")
-    logger.info(f"Execution Time: {end_time - start_time:.4f}s")
-    
-    return {"solution": solution_node.solution(), "cost": solution_node.path_cost, "length": solution_node.depth}
+    logger.info(f"Execution time: {end_time - start_time:.4f}s")
+    return {
+        "solution": solution_node.solution() if solution_node else None,
+        "cost": solution_node.path_cost if solution_node else None,
+        "length": solution_node.depth if solution_node else None
+    }
 
 def main():
     parser = argparse.ArgumentParser(description="Treasure Maze Image Processor")
     parser.add_argument("-d", "--debug", action="store_true", help="Show debug info")
     parser.add_argument("-f", "--file", required=True, help="Path to image file")
     parser.add_argument("-m", "--model", required=True, help="Path to trained model")
+    parser.add_argument("-t", "--treasures", type=int, help="Number of treasures to find")
     parser.add_argument(
         "-a", "--algorithm", 
         required=True, 
         choices=["BFS", "DFS", "UCS", "Best First Graph", "A*"], 
         help="Choose the type of algorithm for pathfinding"
     )
-
+    
     args = parser.parse_args()
     logger = setup_logger(args.debug)
     if args.debug:
@@ -476,7 +516,7 @@ def main():
             if idx < len(predicted_digits):
                 pred = predicted_digits[idx]
                 if not pred or pred[0] == "Unknown":
-                    cell_output = "?"
+                    cell_output = "1" # Fallback
                 else:
                     label_val, conf = pred[0], pred[1]
                     cell_output = f"{label_val} (c: {conf:.2f})"
@@ -491,27 +531,8 @@ def main():
     logger.info(f"Predicted {len(predicted_digits)} digits ({len(predicted_digits) / (rows * columns) * 100:.2f}% of expected)")
     
     logger.info(f"Pathfinding algorithm: {args.algorithm}")
-    pathfinding = pathfind(args.algorithm, rows, columns, predicted_digits)
+    pathfinding = pathfind(args.algorithm, rows, columns, predicted_digits, args.treasures)
 
-    # let's draw a clean version of the grid as a separate image
-    grid_img = np.zeros((EMN_DIGIT_SIZE * rows, EMN_DIGIT_SIZE * columns, 3), np.uint8)
-    for r in range(rows):
-        for c in range(columns):
-            idx = r * columns + c
-            if idx < len(predicted_digits):
-                pred = predicted_digits[idx]
-                if pred and pred[0] != "Unknown":
-                    digit_img = extracted["digits"][idx]
-                    digit_img = cv2.resize(digit_img, (EMN_DIGIT_SIZE, EMN_DIGIT_SIZE))
-                    if len(digit_img.shape) == 2:
-                        digit_img = cv2.cvtColor(digit_img, cv2.COLOR_GRAY2BGR)
-                    digit_img = cv2.flip(digit_img, 1)
-                    digit_img = cv2.rotate(digit_img, cv2.ROTATE_90_COUNTERCLOCKWISE)
-                    digit_img = cv2.bitwise_not(digit_img)
-                    
-                    grid_img[r * EMN_DIGIT_SIZE:(r + 1) * EMN_DIGIT_SIZE, c * EMN_DIGIT_SIZE:(c + 1) * EMN_DIGIT_SIZE] = digit_img  
-                    
-    display_image(grid_img, "Predicted Grid")
     
     # get the position of the start point and draw a bounding box around it (S is the start point)
     start_pos = None
@@ -525,30 +546,6 @@ def main():
                     break
         if start_pos:
             break
-        
-    if start_pos:
-        start_x, start_y = start_pos
-        start_x *= EMN_DIGIT_SIZE
-        start_y *= EMN_DIGIT_SIZE
-        cv2.rectangle(grid_img, (start_x, start_y), (start_x + EMN_DIGIT_SIZE, start_y + EMN_DIGIT_SIZE), (0, 255, 0), 2)
-        display_image(grid_img, "Predicted Grid with Start Point")
-        
-    # based on the instructions from the pathfinding, draw the path on the grid
-    path = pathfinding.solution()
-    if path:
-        for action in path:
-            if action == "UP":
-                start_y -= EMN_DIGIT_SIZE
-            elif action == "DOWN":
-                start_y += EMN_DIGIT_SIZE
-            elif action == "LEFT":
-                start_x -= EMN_DIGIT_SIZE
-            elif action == "RIGHT":
-                start_x += EMN_DIGIT_SIZE
-            cv2.rectangle(grid_img, (start_x, start_y), (start_x + EMN_DIGIT_SIZE, start_y + EMN_DIGIT_SIZE), (0, 0, 255), 2)
-            display_image(grid_img, "Predicted Grid with Path")
-        
-        
     
     
     
