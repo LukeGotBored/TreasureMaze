@@ -459,26 +459,29 @@ class TreasureMaze(Problem):
     def approx_distance(self, node):
         maze = node.state.maze
         agent_position = node.state.position
-        distances = [(agent_position, 0)]
+        treasure_positions = []
+        treasures_collected = len(node.state.treasures)
+        total_distance = 0
 
-        for r, row in enumerate(maze):
-            for c, column in enumerate(row):
-                if row[c] == "T":
-                    treasure_position = (c, r)
-                    treasure_distance = manhattan_distance(agent_position, treasure_position)
-                    distances.append((treasure_position, treasure_distance))
-                    
-        if len(distances) > 1: 
-            distances.sort(key = lambda x: x[1])
-            approx_dist = 0
+        if treasures_collected < self.n_treasures:
+            global position_scan
+            position_scan = agent_position
 
-            treasures_left = self.n_treasures - len(node.state.treasures)
+            for r, row in enumerate(maze):
+                for c, column in enumerate(row):
+                    if row[c] == "T":
+                        treasure_positions.append((c, r))
+            
+            for i in range(0, self.n_treasures - treasures_collected):
+                closest = min(treasure_positions, key = lambda pos: manhattan_distance(position_scan, pos))
+                total_distance += manhattan_distance(position_scan, closest)
+                position_scan = closest
+                treasure_positions.remove(closest)
 
-            for i in range(1, treasures_left + 1):
-                approx_dist += manhattan_distance(distances[i][0], distances[i - 1][0])
-            return approx_dist
-        else:
-            return 0
+                if len(treasure_positions) == 0:
+                    break
+
+        return total_distance
         
 def pathfind(algorithm: str, rows: int, columns: int, predicted_digits: list, treasures: int = None):
     if rows <= 0 or columns <= 0:
