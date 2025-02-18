@@ -406,7 +406,7 @@ class TreasureMazeGUI(QMainWindow):
         self.treasure_spin = None
 
     def init_ui(self):
-        self.setWindowTitle("Treasure Maze Analyzer")
+        self.setWindowTitle("Treasure Maze GUI")
         self.setMinimumSize(*DEFAULT_WINDOW_SIZE)
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
