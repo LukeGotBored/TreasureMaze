@@ -41,8 +41,8 @@ def get_img(file_path: str) -> np.ndarray:
         logger.error(f"Invalid file path: {file_path}")
         return None
     image = cv2.imread(file_path)
-    if image is None:
-        logger.error(f"Failed to load image: {file_path}")
+    if image is None or image.size == 0:
+        logger.error(f"Invalid image data or empty file: {file_path}")
         return None
     return image
 
@@ -57,7 +57,14 @@ def preprocess(image: np.ndarray) -> np.ndarray:
         h, w = image.shape[:2]
         logger.debug(f"Image dimensions: {w}x{h}")
 
+        if h == 0 or w == 0:
+            logger.error("Cannot process image with zero width/height.")
+            return None
+
         if max(h, w) > MAX_SIZE or min(h, w) < MAX_SIZE:
+            if max(h, w) == 0:
+                logger.error("Cannot resize image with zero width/height.")
+                return None
             try:
                 ratio = MAX_SIZE / float(max(h, w))
                 new_size = (int(w * ratio), int(h * ratio))
@@ -150,10 +157,10 @@ def standardize(img) -> np.ndarray:
 # region Digit Extraction
 # Extract digits from the standardized image and prepare them for prediction.
 def safe_boundingRect(contour):
-    # tldr; this function handles the case where the height of the bounding rectangle is zero
     try:
+        if contour is None or (hasattr(contour, 'size') and contour.size == 0):
+            raise ValueError("Empty contour provided")
         rect = cv2.boundingRect(contour)
-        # Guard against division by zero if height is 0.
         if rect[3] == 0:
             raise ValueError("boundingRect height is zero")
         return rect
@@ -259,6 +266,9 @@ def extract_digits(img):
         logger.info(f"Found digits: {len(digits)}")
         newImage = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
         def pad_to_square(image: np.ndarray, target_size: int) -> np.ndarray:
+            if image is None or image.size == 0:
+                logger.error("Empty image provided to pad_to_square")
+                return np.zeros((target_size, target_size), dtype=np.uint8)
             h, w = image.shape[:2]
             if w != h:
                 border = abs(w - h) // 2
@@ -266,6 +276,9 @@ def extract_digits(img):
                     image = cv2.copyMakeBorder(image, border, border, 0, 0, cv2.BORDER_CONSTANT, value=[0, 0, 0])
                 else:
                     image = cv2.copyMakeBorder(image, 0, 0, border, border, cv2.BORDER_CONSTANT, value=[0, 0, 0])
+            if image.shape[0] == 0 or image.shape[1] == 0:
+                logger.error("Image has zero dimensions after padding")
+                return np.zeros((target_size, target_size), dtype=np.uint8)
             return cv2.resize(image, (target_size, target_size), interpolation=cv2.INTER_AREA)
 
         digits_img = []
@@ -486,11 +499,11 @@ class TreasureMaze(Problem):
 def pathfind(algorithm: str, rows: int, columns: int, predicted_digits: list, treasures: int = None):
     if rows <= 0 or columns <= 0:
         logger.error("Invalid grid dimensions")
-        return None
+        return {"solution": None, "cost": None, "length": None}
     
     if not predicted_digits:
         logger.error("No digits predicted, cannot build maze.")
-        return None
+        return {"solution": None, "cost": None, "length": None}
 
     # Rebuild the maze from predictions
     maze = []
@@ -529,16 +542,16 @@ def pathfind(algorithm: str, rows: int, columns: int, predicted_digits: list, tr
 
     if algorithm not in algo_map:
         logger.info(f"Algorithm {algorithm} not recognized")
-        return
+        return {"solution": None, "cost": None, "length": None}
 
     try:
         problem = TreasureMaze(maze, n_treasures=treasures)
     except ValueError as ve:
         logger.error(f"Problem creation failed: {ve}")
-        return None
+        return {"solution": None, "cost": None, "length": None}
     except Exception as e:
         logger.error(f"Unexpected error during problem creation: {e}")
-        return None
+        return {"solution": None, "cost": None, "length": None}
 
     logger.info(f"Executing {algorithm}...")
     start_time = time()
