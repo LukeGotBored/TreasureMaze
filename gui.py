@@ -49,7 +49,7 @@ BUTTON_PADDING = "8px 16px"
 FONT_FAMILY = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont).family()
 MONOSPACE_FONT = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont).family()
 
-# Styled console output colors using Catppuccin Mocha palette
+#? Catppuccin Mocha palette: https://catppuccin.com/palette/
 CONSOLE_STYLES = {
     "info": "color: #89B4FA;",       # Blue
     "success": "color: #A6E3A1;",    # Green
@@ -133,12 +133,11 @@ DARK_MODE = {
     """,
     "grid_border": "none",
     "grid_bg": "#1e1e1e",
-    "confidence_high": "#388E3C",
-    "confidence_medium": "#F57C00",
-    "confidence_low": "#D32F2F",
+    "confidence_high": "#a6e3a1",
+    "confidence_medium": "#f9e07f",
+    "confidence_low": "#f38ba8",
 }
 
-# Add this helper function after your imports and constants
 
 def apply_button_style(btn, style_dict, extra=""):
     btn.setStyleSheet(f"""
@@ -269,8 +268,8 @@ class GridVisualizer(QGraphicsView):
         self.setRenderHints(QtGui.QPainter.RenderHint.Antialiasing)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
         self.placeholder_text = None
-        self.solution_items = []  # Graphics items for solution path visualization
-        self._init_style()  # Renamed from apply_style() for clarity
+        self.solution_items = []
+        self._init_style() 
         self.show_no_grid_message()
 
     def _init_style(self):  # Initial style application
@@ -326,7 +325,7 @@ class GridVisualizer(QGraphicsView):
             raise
 
     def _add_cell(self, x: int, y: int, text: str, confidence: float):
-        # color = self._get_confidence_color(confidence) 
+        color = self._get_confidence_color(confidence) 
         color = self.current_style["grid_bg"]
         rect = self.scene.addRect(
             x * CELL_SIZE,
@@ -353,17 +352,18 @@ class GridVisualizer(QGraphicsView):
             return self.current_style["confidence_medium"]
         return self.current_style["confidence_low"]
 
-    def set_theme(self, style: dict):
-        try:
-            self.current_style = style or DARK_MODE
-            self._init_style()
-            if self.placeholder_text:
-                self.placeholder_text.setBrush(QColor(self.current_style.get("text", "#e0e0e0")))
-                self._update_placeholder_position()
-            self.update_grid([], 0, 0)
-        except Exception as ex:
-            logging.error("Error in set_theme: %s", ex)
-            raise
+    # def set_theme(self, style: dict):
+    #     try:
+            
+    #         self.current_style = style or DARK_MODE
+    #         self._init_style()
+    #         if self.placeholder_text:
+    #             self.placeholder_text.setBrush(QColor(self.current_style.get("text", "#e0e0e0")))
+    #             self._update_placeholder_position()
+    #         self.update_grid([], 0, 0)
+    #     except Exception as ex:
+    #         logging.error("Error in set_theme: %s", ex)
+    #         raise
 
     def clear_solution(self):
         """Clear all solution overlay items"""
@@ -398,12 +398,12 @@ class TreasureMazeGUI(QMainWindow):
     """Main application window implementing the maze analysis interface"""
     def __init__(self):
         super().__init__()
-        # Force dark theme and remove references to light mode:
         self.current_style = DARK_MODE
         self.setup_state()
         self.init_ui()
         self.apply_styles()
         self.setAcceptDrops(True)
+        self._in_theme_update = False
 
     def setup_state(self):
         """Initialize application state variables"""
@@ -417,8 +417,8 @@ class TreasureMazeGUI(QMainWindow):
         self.solution_positions = []   # List of (col, row) coordinates for solution path
         self.current_step_idx = 0      # Current position in solution animation
         self.solution_overlay_items = []  # Overlay graphical items for the displayed solution
-        self.btn_prev = None  # Initialize btn_prev
-        self.btn_next = None  # Initialize btn_next
+        self.btn_prev = None  
+        self.btn_next = None  
         self.treasure_spin = None
 
     def init_ui(self):
@@ -475,7 +475,6 @@ class TreasureMazeGUI(QMainWindow):
         treasure_container = QWidget()
         treasure_layout = QHBoxLayout(treasure_container)
         treasure_layout.setContentsMargins(5, 5, 5, 0)
-        # Shortened label to "T:"
         self.treasure_label = QLabel("T:")
         self.treasure_label.setStyleSheet("""
             QLabel {
@@ -523,16 +522,13 @@ class TreasureMazeGUI(QMainWindow):
         treasure_layout.addWidget(self.treasure_slider)
         treasure_layout.addWidget(self.treasure_value_label)
         treasure_layout.addStretch()
-        # Insert the treasure container at the top (left-aligned) within the grid container layout
         grid_container_layout.insertWidget(0, treasure_container, 0, Qt.AlignmentFlag.AlignCenter)
-        
-        # Create the button panel (for algorithm settings, play and navigation buttons)
+
         btn_panel = QWidget()
         hbox = QHBoxLayout(btn_panel)
         hbox.setContentsMargins(5, 5, 5, 5)
         hbox.setSpacing(10)
 
-        # Ensure self.btn_play is created:
         self.btn_algo = QPushButton("⚙️")
         self.btn_algo.setToolTip("Select Algorithm")
         self.btn_algo.setFixedSize(32, 32)
@@ -593,7 +589,6 @@ class TreasureMazeGUI(QMainWindow):
         layout.addWidget(self.console, 25)
         control_layout = QHBoxLayout()
         self.btn_open = QPushButton("📂 Open Image")
-        # Polished control button style for Open Image
         self.btn_open.setStyleSheet(f"""
             QPushButton {{
                 background-color: {self.current_style['primary']};
@@ -608,7 +603,6 @@ class TreasureMazeGUI(QMainWindow):
         """)
         self.btn_open.clicked.connect(self.open_file_dialog)
         self.btn_process = QPushButton("🔎 Analyze")
-        # Polished control button style for Analyze
         self.btn_process.setStyleSheet(f"""
             QPushButton {{
                 background-color: {self.current_style['primary']};
@@ -669,16 +663,42 @@ class TreasureMazeGUI(QMainWindow):
 
     def _create_menu(self):
         menu_bar = QMenuBar()
+        # Add help -> about action
+        help_menu = menu_bar.addMenu("&Help")
+        about_action = QAction("About", self)
+        def show_about():
+            msg = QtWidgets.QMessageBox(self)
+            msg.setWindowTitle("About Treasure Maze")
+            msg.setTextFormat(QtCore.Qt.TextFormat.RichText)
+            msg.setText(
+            "<div style='text-align: center;'>"
+            "<h2 style='color: #f0f0f0;'>Treasure Maze</h2>"
+            "<p style='color: #f0f0f0;'>Version 1.0.0</p>"
+            "<p style='color: #f0f0f0;'>&lt;/&gt; made with ❤️ by <br>"
+            "<a style='color: #0078D7;' href='https://github.com/LukeGotBored'>Gianluca Suriani</a> and "
+            "<a style='color: #0078D7;' href='https://github.com/andr3wpixel'>Andrea Riccardi</a>"
+            "</p></div>"
+            )
+            msg.setStyleSheet("QMessageBox { background-color: #2b2b2b; color: #f0f0f0; }")
+            msg.exec()
+        about_action.triggered.connect(show_about)
+        help_menu.addAction(about_action)
+
         file_menu = menu_bar.addMenu("&File")
-        open_action = QAction("Open...", self)
-        open_action.triggered.connect(self.open_file_dialog)
+        open_action = QAction("Open...", self, shortcut="Ctrl+O", triggered=self.open_file_dialog)
+        
         file_menu.addAction(open_action)
 
-        # Removed theme menu creation
         self.setMenuBar(menu_bar)
 
     def apply_styles(self):
-        base_style = f"""
+        global_text_rules = """
+        * {
+            letter-spacing: normal;
+            line-height: normal;
+        }
+        """
+        base_style = global_text_rules + f"""
             QMainWindow {{
                 background-color: {self.current_style['primary']};
                 color: {self.current_style['text']};
@@ -702,7 +722,7 @@ class TreasureMazeGUI(QMainWindow):
             }}
         """
         self.setStyleSheet(base_style)
-        self.grid_visualizer.set_theme(self.current_style)
+        # self.grid_visualizer.set_theme(self.current_style)
         self.progress_bar.setStyleSheet(self.current_style["progress"])
 
     def dragEnterEvent(self, event):
@@ -917,6 +937,18 @@ class TreasureMazeGUI(QMainWindow):
         if self.active_worker:
             self.active_worker.cancel()
         event.accept()
+
+    def changeEvent(self, event):
+        if event.type() == QtCore.QEvent.Type.PaletteChange:
+            self.on_system_theme_changed()
+        super().changeEvent(event)
+
+    def on_system_theme_changed(self):
+        if self._in_theme_update:
+            return
+        self._in_theme_update = True
+        self.apply_styles()
+        self._in_theme_update = False
 
 
 def main():
