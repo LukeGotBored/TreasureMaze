@@ -59,7 +59,7 @@ Use the provided options within the GUI to load images, analyze them, and visual
 - **AIMA Search Algorithms:** For demonstrating various pathfinding techniques.
 
 ## Credits
-- Developed by [Gianluca Suriani](@LukeGotBored) and [Andrea Riccardi](@andr3wpixel).
+- Developed by [Gianluca Suriani](https://github.com/LukeGotBored) and [Andrea Riccardi](https://github.com/andr3wpixel).
 - EMNIST dataset provided by [NIST](https://www.nist.gov/itl/iad/image-group/emnist-dataset).
 
 ## License
