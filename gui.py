@@ -663,7 +663,22 @@ class TreasureMazeGUI(QMainWindow):
 
     def _create_menu(self):
         menu_bar = QMenuBar()
-        # Add help -> about action
+        menu_bar.setStyleSheet(f"""
+            QMenuBar {{
+                background-color: {self.current_style['secondary']};
+                color: {self.current_style['text']};
+            }}
+            QMenuBar::item:selected {{
+                background-color: {self.current_style['primary']};
+                color: {self.current_style['text']};
+            }}
+        """)
+        file_menu = menu_bar.addMenu("&File")
+        open_action = QAction("Open...", self, shortcut="Ctrl+O", triggered=self.open_file_dialog)
+        quit_action = QAction("Quit", self, shortcut="Ctrl+Q", triggered=self.close)
+        file_menu.addAction(open_action)
+        file_menu.addAction(quit_action)
+
         help_menu = menu_bar.addMenu("&Help")
         about_action = QAction("About", self)
         def show_about():
@@ -683,11 +698,6 @@ class TreasureMazeGUI(QMainWindow):
             msg.exec()
         about_action.triggered.connect(show_about)
         help_menu.addAction(about_action)
-
-        file_menu = menu_bar.addMenu("&File")
-        open_action = QAction("Open...", self, shortcut="Ctrl+O", triggered=self.open_file_dialog)
-        
-        file_menu.addAction(open_action)
 
         self.setMenuBar(menu_bar)
 
@@ -950,6 +960,10 @@ class TreasureMazeGUI(QMainWindow):
         self.apply_styles()
         self._in_theme_update = False
 
+    def close(self):
+        super().close()
+        if self.active_worker:
+            self.active_worker.cancel()
 
 def main():
     app = QApplication(sys.argv)
