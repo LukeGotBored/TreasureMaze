@@ -150,7 +150,7 @@ def standardize(img) -> np.ndarray:
 # region Digit Extraction
 # Extract digits from the standardized image and prepare them for prediction.
 def safe_boundingRect(contour):
-    # tldr this function handles the case where the height of the bounding rectangle is zero
+    # tldr; this function handles the case where the height of the bounding rectangle is zero
     try:
         rect = cv2.boundingRect(contour)
         # Guard against division by zero if height is 0.
@@ -161,7 +161,6 @@ def safe_boundingRect(contour):
         logger.error(f"Error in boundingRect: {e}")
         return (0, 0, 0, 0)
 
-# Update get_next_cnt with per-case error handling
 def get_next_cnt(h, i):
     try:
         return int(h[0][i][0])
@@ -169,7 +168,6 @@ def get_next_cnt(h, i):
         logger.error(f"Error in get_next_cnt for index {i}: {e}")
         return -1
 
-# Update get_first_child with per-case error handling
 def get_first_child(h, i):
     try:
         return int(h[0][i][2])
@@ -595,7 +593,7 @@ def main():
     rows = grid_info.get("rows", 0)
     columns = grid_info.get("columns", 0)
 
-    # Gracefully exit if grid extraction failed
+    # exit if grid extraction failed
     if rows == 0 or columns == 0 or not extracted.get("digits"):
         logger.error("Grid extraction did not complete successfully; aborting the process.")
         return 1
