@@ -12,7 +12,7 @@ This project performs the following tasks:
 ## Installation
 
 ### Requirements
-- Python 3.x  
+- Python 3.x (any version supported by TensorFlow)
 - OpenCV (≥ 4.0)  
 - NumPy  
 - TensorFlow & Keras  
