@@ -1,6 +1,3 @@
-# alla fine non abbiamo fatto il sito :)
-
-
 # region Imports
 import sys
 import os
@@ -248,7 +245,7 @@ class ImageProcessingWorker(QRunnable):
                 timing_info,
             )
         except Exception as e:
-            self.signals.error.emit(f"{str(e)}")
+            self.signals.error.emit(f"Processing error: {e}")
         finally:
             self.signals.finished.emit()
             self.signals.progress.emit(100)
@@ -351,19 +348,6 @@ class GridVisualizer(QGraphicsView):
         if confidence >= CONFIDENCE_MEDIUM:
             return self.current_style["confidence_medium"]
         return self.current_style["confidence_low"]
-
-    # def set_theme(self, style: dict):
-    #     try:
-            
-    #         self.current_style = style or DARK_MODE
-    #         self._init_style()
-    #         if self.placeholder_text:
-    #             self.placeholder_text.setBrush(QColor(self.current_style.get("text", "#e0e0e0")))
-    #             self._update_placeholder_position()
-    #         self.update_grid([], 0, 0)
-    #     except Exception as ex:
-    #         logging.error("Error in set_theme: %s", ex)
-    #         raise
 
     def clear_solution(self):
         """Clear all solution overlay items"""
@@ -470,8 +454,7 @@ class TreasureMazeGUI(QMainWindow):
         self.grid_visualizer.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding,
                                             QtWidgets.QSizePolicy.Policy.Expanding)
         grid_container_layout.addWidget(self.grid_visualizer)
-        
-        # Create a dedicated container for the treasure slider (one line) and insert into grid container
+
         treasure_container = QWidget()
         treasure_layout = QHBoxLayout(treasure_container)
         treasure_layout.setContentsMargins(5, 5, 5, 0)
@@ -732,7 +715,6 @@ class TreasureMazeGUI(QMainWindow):
             }}
         """
         self.setStyleSheet(base_style)
-        # self.grid_visualizer.set_theme(self.current_style)
         self.progress_bar.setStyleSheet(self.current_style["progress"])
 
     def dragEnterEvent(self, event):
@@ -766,24 +748,25 @@ class TreasureMazeGUI(QMainWindow):
             self.load_image(path)
 
     def start_processing(self):
-        if not self.image_path:
-            self.show_error("No image selected")
-            return
+        try:
+            if not self.image_path:
+                raise ValueError("No image path provided.")
+            self.console.clear()
+            self.progress_bar.show()
+            self.btn_process.setEnabled(False)
+            self.btn_open.setEnabled(False)
+            self.status_label.setText("Processing...")
 
-        self.console.clear()
-        self.progress_bar.show()
-        self.btn_process.setEnabled(False)
-        self.btn_open.setEnabled(False)
-        self.status_label.setText("Processing...")
+            self.reset_solution()
 
-        self.reset_solution()
-
-        self.active_worker = ImageProcessingWorker(self.image_path)
-        self.active_worker.signals.progress.connect(self.progress_bar.setValue)
-        self.active_worker.signals.result.connect(self.handle_results)
-        self.active_worker.signals.error.connect(self.show_error)
-        self.active_worker.signals.finished.connect(self.processing_finished)
-        self.thread_pool.start(self.active_worker)
+            self.active_worker = ImageProcessingWorker(self.image_path)
+            self.active_worker.signals.progress.connect(self.progress_bar.setValue)
+            self.active_worker.signals.result.connect(self.handle_results)
+            self.active_worker.signals.error.connect(self.show_error)
+            self.active_worker.signals.finished.connect(self.processing_finished)
+            self.thread_pool.start(self.active_worker)
+        except Exception as e:
+            self.show_error(str(e))
 
     def handle_results(self, predictions: list, rows: int, cols: int, timing_info: dict):
         try:
