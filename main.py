@@ -389,17 +389,18 @@ class TreasureMaze(Problem):
         self.initial = MazeState(initial_maze, initial_position, ())
 
         # Count total treasures and validate requested treasure count
-        treasures = self.count_treasures(maze)
-        if n_treasures:
+        treasures_detected = self.count_treasures(maze)
+        if n_treasures is not None:
             if n_treasures <= 0:
-                logger.error("Requested treasure count must be positive.")
-                raise ValueError("Invalid treasure count.")
-            if n_treasures > treasures:
-                logger.error("Not enough treasures in maze for requested count!")
-                raise ValueError("Too few treasures in maze.")
-            self.n_treasures = n_treasures
+                logger.warning("Specified treasure count <= 0, falling back to 1")
+                self.n_treasures = 1
+            elif n_treasures > treasures_detected:
+                logger.warning(f"Specified treasure count ({n_treasures}) exceeds available treasures ({treasures_detected}), falling back to {treasures_detected}")
+                self.n_treasures = treasures_detected
+            else:
+                self.n_treasures = n_treasures
         else:
-            self.n_treasures = treasures
+            self.n_treasures = treasures_detected
 
     def count_treasures(self, maze):
         return sum(row.count("T") for row in maze)
